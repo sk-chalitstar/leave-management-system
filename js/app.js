@@ -820,12 +820,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     if (confirm.isConfirmed) {
+      Swal.fire({
+        title: "กำลังลบข้อมูล...",
+        text: "กำลังดำเนินการและคืนสิทธิ์วันลา",
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
+
       try {
         await window.leaveAPI.deleteLeaveRequest(requestId);
-        Swal.fire({ icon: "success", title: "ลบรายการลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
         await loadData();
+        Swal.fire({ icon: "success", title: "ลบรายการลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
       } catch (err) {
-        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการลบ", text: err.message });
       }
     }
   };
@@ -1529,6 +1538,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Departments Modal Events
     document.getElementById("btn-open-departments-modal")?.addEventListener("click", () => {
+      renderDepartmentsList();
+      document.getElementById("modal-departments")?.classList.remove("hidden");
+      initLucide();
+    });
+
+    document.getElementById("btn-sidebar-departments")?.addEventListener("click", () => {
       renderDepartmentsList();
       document.getElementById("modal-departments")?.classList.remove("hidden");
       initLucide();

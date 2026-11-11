@@ -470,16 +470,17 @@ function handleUpdateLeaveRequest(ss, payload) {
 function handleDeleteLeaveRequest(ss, payload) {
   const sheet = ss.getSheetByName("LeaveRequests");
   const data = sheet.getDataRange().getValues();
-  const requestId = payload.request_id;
+  const requestId = String(payload.request_id || "").trim();
 
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(requestId).trim()) {
+    const rowId = String(data[i][0] || "").trim();
+    if (rowId === requestId || rowId.toLowerCase() === requestId.toLowerCase()) {
       sheet.deleteRow(i + 1);
       return { success: true, message: "ลบคำขอลาสำเร็จ" };
     }
   }
 
-  return { success: false, message: "ไม่พบคำขอนี้ในระบบ" };
+  return { success: false, message: "ไม่พบคำขอรหัส " + requestId + " ใน Google Sheet" };
 }
 
 /**

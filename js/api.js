@@ -214,6 +214,14 @@ class LeaveAPI {
    * ลบคำขอลา (Delete Leave Request)
    */
   async deleteLeaveRequest(requestId) {
+    const targetId = String(requestId).trim();
+
+    // 1. ลบออกจาก LocalStorage ก่อนเสมอเพื่อความรวดเร็วและไม่ค้างในแคช
+    let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+    leaves = leaves.filter(l => String(l.request_id).trim() !== targetId);
+    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+
+    // 2. ถ้าเชื่อมต่อ Google Sheets ให้ส่งคำสั่งไปลบในชีต
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -221,19 +229,20 @@ class LeaveAPI {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "deleteLeaveRequest",
-            payload: { request_id: requestId }
+            payload: { request_id: targetId }
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        if (result.success) {
+          return result;
+        }
+        throw new Error(result.message || "Google Sheets ปฏิเสธการลบ");
       } catch (err) {
-        console.warn("GAS delete leave error, fallback to local:", err);
+        console.error("GAS delete leave error:", err);
+        throw new Error(`ลบในเครื่องสำเร็จ แต่ Google Sheet ยังไม่อัปเดต: ${err.message} (โปรดตรวจสอบการ Deploy เวอร์ชันใหม่ใน Apps Script)`);
       }
     }
 
-    let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
-    leaves = leaves.filter(l => l.request_id !== requestId);
-    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
     return { success: true, message: "ลบรายการลาเรียบร้อยแล้ว" };
   }
 

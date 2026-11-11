@@ -91,6 +91,11 @@
         <span>สิทธิ์วันลาพนักงาน</span>
       </button>
 
+      <button id="btn-sidebar-departments" type="button" class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-white hover:bg-slate-800">
+        <i data-lucide="folder-cog" class="w-4 h-4 text-indigo-400"></i>
+        <span>จัดการรายชื่อแผนก</span>
+      </button>
+
       <button class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-white hover:bg-slate-800" data-tab="tab-holidays">
         <i data-lucide="calendar-heart" class="w-4 h-4"></i>
         <span>วันหยุดนักขัตฤกษ์</span>
@@ -873,7 +878,13 @@
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block font-semibold text-slate-700 mb-1">แผนก <span class="text-rose-500">*</span></label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block font-semibold text-slate-700">แผนก <span class="text-rose-500">*</span></label>
+              <button type="button" onclick="document.getElementById('modal-departments').classList.remove('hidden')" class="text-[11px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors" title="คลิกเพื่อเพิ่มหรือแก้ไขรายชื่อแผนก">
+                <i data-lucide="settings" class="w-3 h-3"></i>
+                <span>เพิ่ม/แก้ไขแผนก</span>
+              </button>
+            </div>
             <select id="emp-modal-dept" required class="w-full rounded-lg border-slate-300 p-2.5 border bg-white">
               <!-- Departments -->
             </select>
