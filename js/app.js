@@ -636,16 +636,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const isRest = currentModalRestDays.has(d.day);
       if (isRest) {
         return `
-          <button type="button" onclick="window.toggleRestDay(${d.day})" class="p-2 rounded-xl text-xs font-bold border-2 border-rose-500 bg-rose-50 text-rose-700 flex flex-col items-center gap-1 shadow-xs transition-all hover:bg-rose-100">
+          <button type="button" onclick="window.toggleRestDay(${d.day})" class="p-1 sm:p-2 rounded-xl text-[10px] sm:text-xs font-bold border-2 border-rose-500 bg-rose-50 text-rose-700 flex flex-col items-center gap-0.5 sm:gap-1 shadow-xs transition-all hover:bg-rose-100">
             <span>${d.name}</span>
-            <span class="text-[9px] bg-rose-500 text-white rounded-full px-1.5 py-0.2 font-semibold">หยุด</span>
+            <span class="text-[8px] sm:text-[9px] bg-rose-500 text-white rounded-full px-1 sm:px-1.5 py-0.2 font-semibold">หยุด</span>
           </button>
         `;
       } else {
         return `
-          <button type="button" onclick="window.toggleRestDay(${d.day})" class="p-2 rounded-xl text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white hover:border-slate-300 flex flex-col items-center gap-1 transition-all">
+          <button type="button" onclick="window.toggleRestDay(${d.day})" class="p-1 sm:p-2 rounded-xl text-[10px] sm:text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white hover:border-slate-300 flex flex-col items-center gap-0.5 sm:gap-1 transition-all">
             <span>${d.name}</span>
-            <span class="text-[9px] text-slate-400">ทำงาน</span>
+            <span class="text-[8px] sm:text-[9px] text-slate-400">ทำงาน</span>
           </button>
         `;
       }
@@ -1544,21 +1544,59 @@ document.addEventListener("DOMContentLoaded", () => {
     return `<span class="badge-status badge-status-approved"><i data-lucide="check" class="w-3 h-3"></i> บันทึกแล้ว</span>`;
   }
 
+  function openMobileSidebar() {
+    const sidebar = document.getElementById("sidebar");
+    const backdrop = document.getElementById("sidebar-backdrop");
+    if (sidebar) sidebar.classList.remove("-translate-x-full");
+    if (backdrop) backdrop.classList.remove("hidden");
+    document.body.classList.add("overflow-hidden");
+  }
+
+  function closeMobileSidebar() {
+    const sidebar = document.getElementById("sidebar");
+    const backdrop = document.getElementById("sidebar-backdrop");
+    if (sidebar) sidebar.classList.add("-translate-x-full");
+    if (backdrop) backdrop.classList.add("hidden");
+    document.body.classList.remove("overflow-hidden");
+  }
+
   function switchTab(targetTabId) {
     document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.add("hidden"));
+    
+    // Desktop Nav Items
     document.querySelectorAll(".nav-item").forEach(item => {
       item.classList.remove("active", "bg-blue-600", "text-white");
       item.classList.add("text-slate-400");
     });
 
+    // Mobile Bottom Nav Items
+    document.querySelectorAll(".bottom-nav-item").forEach(item => {
+      item.classList.remove("active", "text-blue-600");
+      item.classList.add("text-slate-500");
+    });
+
     const activePane = document.getElementById(targetTabId);
     if (activePane) activePane.classList.remove("hidden");
 
+    // Active Desktop Item
     const activeBtn = document.querySelector(`.nav-item[data-tab="${targetTabId}"]`);
     if (activeBtn) {
       activeBtn.classList.add("active", "bg-blue-600", "text-white");
       activeBtn.classList.remove("text-slate-400");
     }
+
+    // Active Mobile Bottom Item
+    const activeBottomBtn = document.querySelector(`.bottom-nav-item[data-tab="${targetTabId}"]`);
+    if (activeBottomBtn) {
+      activeBottomBtn.classList.add("active", "text-blue-600");
+      activeBottomBtn.classList.remove("text-slate-500");
+    }
+
+    // ปิด Sidebar Drawer บนมือถือ อัตโนมัติเมื่อเลือกเมนู
+    closeMobileSidebar();
+
+    // เลื่อนหน้าจอกลับด้านบนสุดเพื่อความสะดวกในการใช้งาน
+    window.scrollTo({ top: 0, behavior: "smooth" });
 
     const pageTitle = document.getElementById("page-title");
     const pageSubtitle = document.getElementById("page-subtitle");
@@ -1603,6 +1641,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function initEventHandlers() {
+    // Desktop Nav Items
     document.querySelectorAll(".nav-item").forEach(btn => {
       btn.addEventListener("click", () => {
         const tab = btn.getAttribute("data-tab");
@@ -1610,12 +1649,23 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    const mobileMenuBtn = document.getElementById("mobile-menu-btn");
-    const sidebarNav = document.getElementById("sidebar-nav");
-    if (mobileMenuBtn && sidebarNav) {
-      mobileMenuBtn.addEventListener("click", () => {
-        sidebarNav.classList.toggle("hidden");
+    // Mobile Bottom Tab Items
+    document.querySelectorAll(".bottom-nav-item[data-tab]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const tab = btn.getAttribute("data-tab");
+        if (tab) switchTab(tab);
       });
+    });
+
+    // Mobile Drawer Triggers
+    document.getElementById("btn-open-sidebar-mobile")?.addEventListener("click", openMobileSidebar);
+    document.getElementById("btn-bottom-more-menu")?.addEventListener("click", openMobileSidebar);
+    document.getElementById("btn-close-sidebar")?.addEventListener("click", closeMobileSidebar);
+    document.getElementById("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
+
+    const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+    if (mobileMenuBtn) {
+      mobileMenuBtn.addEventListener("click", openMobileSidebar);
     }
 
     document.getElementById("btn-quick-new-leave")?.addEventListener("click", () => {
@@ -1827,6 +1877,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("btn-sidebar-departments")?.addEventListener("click", () => {
+      closeMobileSidebar();
       renderDepartmentsList();
       document.getElementById("modal-departments")?.classList.remove("hidden");
       initLucide();
@@ -2078,6 +2129,15 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll(".btn-close-modal").forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments, #modal-edit-leave").forEach(m => m.classList.add("hidden"));
+      });
+    });
+
+    // Tap backdrop to close modals (Mobile & Desktop convenience)
+    document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments, #modal-edit-leave").forEach(modal => {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.classList.add("hidden");
+        }
       });
     });
   }
