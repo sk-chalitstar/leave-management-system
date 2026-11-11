@@ -217,19 +217,40 @@ function getEmployeesData(ss) {
   if (data.length <= 1) return [];
 
   const headers = data[0];
+  let restDaysCol = -1;
+  for (let c = 0; c < headers.length; c++) {
+    if (String(headers[c]).trim().toLowerCase() === "rest_days") {
+      restDaysCol = c;
+      break;
+    }
+  }
+
+  // หากใน Sheet ยังไม่มีหัวคอลัมน์ rest_days ให้เพิ่มที่คอลัมน์ 12 ทันที
+  if (restDaysCol === -1) {
+    restDaysCol = 11;
+    sheet.getRange(1, 12).setValue("rest_days").setFontWeight("bold").setBackground("#EEF2F6");
+  }
+
   const list = [];
   for (let i = 1; i < data.length; i++) {
     let row = data[i];
     let obj = {};
     for (let j = 0; j < headers.length; j++) {
-      obj[headers[j]] = row[j];
+      if (headers[j]) {
+        obj[headers[j]] = row[j];
+      }
     }
-    // Parse rest_days จากข้อความ "0,6" ให้กลายเป็น Array [0, 6]
-    if (obj.rest_days !== undefined && obj.rest_days !== null && String(obj.rest_days).trim() !== "") {
-      obj.rest_days = String(obj.rest_days).split(",").map(function(s) { return Number(s.trim()); }).filter(function(n) { return !isNaN(n); });
+
+    // ดึงค่าเวรหยุด rest_days
+    let rawRest = row[restDaysCol] !== undefined ? row[restDaysCol] : row[11];
+    if (rawRest === "none" || rawRest === "[]" || rawRest === "-") {
+      obj.rest_days = [];
+    } else if (rawRest !== undefined && rawRest !== null && String(rawRest).trim() !== "") {
+      obj.rest_days = String(rawRest).split(",").map(function(s) { return Number(s.trim()); }).filter(function(n) { return !isNaN(n); });
     } else {
       obj.rest_days = [0, 6]; // ค่าเริ่มต้น เสาร์-อาทิตย์
     }
+
     list.push(obj);
   }
   return list;
@@ -525,6 +546,11 @@ function handleSaveEmployee(ss, payload) {
   const data = sheet.getDataRange().getValues();
   const empId = payload.emp_id;
 
+  // ตรวจสอบให้แน่ใจว่าหัวตารางคอลัมน์ 12 มีอยู่และเป็น rest_days
+  if (sheet.getLastColumn() < 12 || String(sheet.getRange(1, 12).getValue()).trim() === "") {
+    sheet.getRange(1, 12).setValue("rest_days").setFontWeight("bold").setBackground("#EEF2F6");
+  }
+
   let foundRow = -1;
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === String(empId).trim()) {
@@ -533,9 +559,13 @@ function handleSaveEmployee(ss, payload) {
     }
   }
 
-  const restDaysStr = Array.isArray(payload.rest_days) 
-    ? payload.rest_days.join(",") 
-    : (payload.rest_days !== undefined && payload.rest_days !== null ? String(payload.rest_days) : "0,6");
+  // แปลงค่า rest_days: ถ้าเลือกเป็น array ว่าง ให้เก็บ "none" เพื่อป้องกันไม่ให้ย้อนกลับไปดีฟอลต์เป็น [0,6]
+  let restDaysStr = "0,6";
+  if (Array.isArray(payload.rest_days)) {
+    restDaysStr = payload.rest_days.length > 0 ? payload.rest_days.join(",") : "none";
+  } else if (payload.rest_days !== undefined && payload.rest_days !== null && String(payload.rest_days).trim() !== "") {
+    restDaysStr = String(payload.rest_days);
+  }
 
   const rowValues = [
     payload.emp_id,

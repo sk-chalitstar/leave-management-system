@@ -933,62 +933,22 @@
               <i data-lucide="calendar-off" class="w-4 h-4 text-rose-500"></i>
               เวรหยุดประจำสัปดาห์ (วันหยุดประจำตัวพนักงาน):
             </span>
-            <span class="text-[11px] text-slate-500">เลือกวันที่หยุดประจำ</span>
+            <span id="rest-days-summary-text" class="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">เสาร์ - อาทิตย์</span>
           </div>
-          <p class="text-[11px] text-slate-500 mb-2">เมื่อพนักงานยื่นลา ระบบจะตัดเวรหยุดนี้และวันหยุดนักขัตฤกษ์ออก (ไม่ฟิกเฉพาะเสาร์-อาทิตย์)</p>
+          <p class="text-[11px] text-slate-500 mb-2">คลิกเลือกวันหยุดของพนักงาน (ปุ่มสีแดงคือวันหยุด / ปุ่มสีเทาคือวันทำงาน):</p>
 
-          <!-- Day of week checkboxes styled as buttons -->
-          <div class="grid grid-cols-7 gap-1.5 text-center">
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="0" class="peer hidden" checked>
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-rose-50 peer-checked:border-rose-400 peer-checked:text-rose-700 transition-colors">
-                อาทิตย์
-              </div>
-            </label>
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="1" class="peer hidden">
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-amber-50 peer-checked:border-amber-400 peer-checked:text-amber-700 transition-colors">
-                จันทร์
-              </div>
-            </label>
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="2" class="peer hidden">
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-pink-50 peer-checked:border-pink-400 peer-checked:text-pink-700 transition-colors">
-                อังคาร
-              </div>
-            </label>
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="3" class="peer hidden">
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-emerald-50 peer-checked:border-emerald-400 peer-checked:text-emerald-700 transition-colors">
-                พุธ
-              </div>
-            </label>
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="4" class="peer hidden">
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-orange-50 peer-checked:border-orange-400 peer-checked:text-orange-700 transition-colors">
-                พฤหัส
-              </div>
-            </label>
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="5" class="peer hidden">
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-blue-50 peer-checked:border-blue-400 peer-checked:text-blue-700 transition-colors">
-                ศุกร์
-              </div>
-            </label>
-            <label class="cursor-pointer">
-              <input type="checkbox" name="emp-rest-day" value="6" class="peer hidden" checked>
-              <div class="py-2 px-1 rounded-lg border border-slate-200 text-xs font-semibold peer-checked:bg-purple-50 peer-checked:border-purple-400 peer-checked:text-purple-700 transition-colors">
-                เสาร์
-              </div>
-            </label>
+          <!-- Day of week interactive buttons -->
+          <div id="rest-days-buttons-grid" class="grid grid-cols-7 gap-1.5 text-center select-none">
+            <!-- Dynamic interactive day buttons rendered by JS -->
           </div>
 
           <!-- Quick Presets -->
-          <div class="flex items-center gap-1.5 mt-2">
+          <div class="flex flex-wrap items-center gap-1.5 mt-2.5">
             <span class="text-[10px] text-slate-400">เลือกด่วน:</span>
-            <button type="button" onclick="window.setRestDaysPreset([0, 6])" class="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded text-slate-600 transition-colors">เสาร์ - อาทิตย์</button>
-            <button type="button" onclick="window.setRestDaysPreset([0])" class="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded text-slate-600 transition-colors">อาทิตย์ วันเดียว</button>
-            <button type="button" onclick="window.setRestDaysPreset([])" class="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded text-slate-600 transition-colors">ไม่มีวันหยุดประจำ (เข้ากะ/เวร)</button>
+            <button type="button" onclick="window.setRestDaysPreset([0, 6])" class="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md text-slate-700 font-medium transition-colors border border-slate-200">เสาร์ - อาทิตย์</button>
+            <button type="button" onclick="window.setRestDaysPreset([0])" class="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md text-slate-700 font-medium transition-colors border border-slate-200">อาทิตย์ วันเดียว</button>
+            <button type="button" onclick="window.setRestDaysPreset([6])" class="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md text-slate-700 font-medium transition-colors border border-slate-200">เสาร์ วันเดียว</button>
+            <button type="button" onclick="window.setRestDaysPreset([])" class="text-[10px] bg-rose-50 hover:bg-rose-100 px-2 py-1 rounded-md text-rose-700 font-medium transition-colors border border-rose-200">ไม่มีวันหยุดประจำ (เข้าเวรหมุนเวียน)</button>
           </div>
         </div>
 
@@ -1302,9 +1262,9 @@
     </div>
   </div>
 
-  <!-- Scripts -->
-  <script src="js/config.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/app.js"></script>
+  <!-- Scripts with Cache Buster -->
+  <script src="js/config.js?v=2.2"></script>
+  <script src="js/api.js?v=2.2"></script>
+  <script src="js/app.js?v=2.2"></script>
 </body>
 </html>

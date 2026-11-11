@@ -341,16 +341,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const leaveSelect = document.getElementById("leave-form-emp-select");
     const reportSelect = document.getElementById("report-filter-emp");
 
+    const currentLeaveEmp = leaveSelect?.value || (state.currentEmployee ? state.currentEmployee.emp_id : "");
+    const currentReportEmp = reportSelect?.value || "";
+
     const empOptions = state.employees.map(emp => {
       return `<option value="${emp.emp_id}">${emp.emp_id} - ${escapeHtml(emp.name)} (${escapeHtml(emp.department)})</option>`;
     }).join("");
 
     if (leaveSelect) {
       leaveSelect.innerHTML = `<option value="">-- ค้นหาและเลือกพนักงาน --</option>` + empOptions;
+      if (currentLeaveEmp && state.employees.some(e => e.emp_id === currentLeaveEmp)) {
+        leaveSelect.value = currentLeaveEmp;
+      }
     }
 
     if (reportSelect) {
       reportSelect.innerHTML = `<option value="">-- พนักงานทุกคน --</option>` + empOptions;
+      if (currentReportEmp && state.employees.some(e => e.emp_id === currentReportEmp)) {
+        reportSelect.value = currentReportEmp;
+      }
     }
   }
 
@@ -514,6 +523,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hourlyBox) hourlyBox.classList.add("hidden");
     }
 
+    if (!state.currentEmployee) {
+      totalDaysSpan.textContent = "0";
+      banner.innerHTML = `<span class="text-amber-700 font-medium">⚠️ กรุณาค้นหาและเลือกพนักงานผู้ขอยื่นลาด้านบน เพื่อคำนวณวันทำการตามเวรหยุดจริง</span>`;
+      return 0;
+    }
+
     if (!startDate || !endDate) {
       totalDaysSpan.textContent = "0";
       banner.textContent = "กรุณาเลือกวันที่เริ่มและสิ้นสุดการลา";
@@ -524,7 +539,8 @@ document.addEventListener("DOMContentLoaded", () => {
     totalDaysSpan.textContent = workingDays;
 
     if (workingDays === 0) {
-      banner.innerHTML = `<span class="text-rose-600 font-semibold">ช่วงวันที่เลือกตรงกับวันหยุดทั้งหมด (เวรหยุดประจำตัว หรือวันหยุดนักขัตฤกษ์)</span>`;
+      const restLabel = formatRestDays(state.currentEmployee ? state.currentEmployee.rest_days : [0, 6]);
+      banner.innerHTML = `<span class="text-rose-600 font-semibold">ช่วงวันที่เลือกตรงกับวันหยุดทั้งหมด (เวรหยุดของพนักงาน: ${escapeHtml(restLabel)} หรือตรงกับวันหยุดนักขัตฤกษ์)</span>`;
     } else {
       if (durationType === "hourly") {
         const timeStart = document.getElementById("leave-form-time-start")?.value || "08:00";
@@ -576,7 +592,7 @@ document.addEventListener("DOMContentLoaded", () => {
    */
   function formatRestDays(restDays) {
     if (!restDays || !Array.isArray(restDays) || restDays.length === 0) {
-      return "ไม่มีวันหยุดประจำ (เข้ากะ/เวร)";
+      return "ไม่มีวันหยุดประจำ (เข้ากะ/เวรหมุนเวียน)";
     }
     const dayNames = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์"];
     const sorted = [...restDays].map(Number).sort((a, b) => a - b);
@@ -586,14 +602,58 @@ document.addEventListener("DOMContentLoaded", () => {
     return sorted.map(d => dayNames[d]).join(", ");
   }
 
-  /**
-   * กำหนดค่า Checkbox เวรหยุดด่วน
-   */
+  let currentModalRestDays = new Set([0, 6]);
+  const DAYS_OF_WEEK = [
+    { day: 0, name: "อาทิตย์" },
+    { day: 1, name: "จันทร์" },
+    { day: 2, name: "อังคาร" },
+    { day: 3, name: "พุธ" },
+    { day: 4, name: "พฤหัส" },
+    { day: 5, name: "ศุกร์" },
+    { day: 6, name: "เสาร์" }
+  ];
+
+  function renderRestDaysButtons() {
+    const grid = document.getElementById("rest-days-buttons-grid");
+    const summaryText = document.getElementById("rest-days-summary-text");
+    if (!grid) return;
+
+    grid.innerHTML = DAYS_OF_WEEK.map(d => {
+      const isRest = currentModalRestDays.has(d.day);
+      if (isRest) {
+        return `
+          <button type="button" onclick="window.toggleRestDay(${d.day})" class="p-2 rounded-xl text-xs font-bold border-2 border-rose-500 bg-rose-50 text-rose-700 flex flex-col items-center gap-1 shadow-xs transition-all hover:bg-rose-100">
+            <span>${d.name}</span>
+            <span class="text-[9px] bg-rose-500 text-white rounded-full px-1.5 py-0.2 font-semibold">หยุด</span>
+          </button>
+        `;
+      } else {
+        return `
+          <button type="button" onclick="window.toggleRestDay(${d.day})" class="p-2 rounded-xl text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white hover:border-slate-300 flex flex-col items-center gap-1 transition-all">
+            <span>${d.name}</span>
+            <span class="text-[9px] text-slate-400">ทำงาน</span>
+          </button>
+        `;
+      }
+    }).join("");
+
+    if (summaryText) {
+      summaryText.textContent = formatRestDays(Array.from(currentModalRestDays));
+    }
+  }
+
+  window.toggleRestDay = function(dayNumber) {
+    if (currentModalRestDays.has(dayNumber)) {
+      currentModalRestDays.delete(dayNumber);
+    } else {
+      currentModalRestDays.add(dayNumber);
+    }
+    renderRestDaysButtons();
+  };
+
   window.setRestDaysPreset = function(daysArray) {
-    const checkboxes = document.querySelectorAll('input[name="emp-rest-day"]');
-    checkboxes.forEach(cb => {
-      cb.checked = daysArray.includes(Number(cb.value));
-    });
+    currentModalRestDays = new Set(daysArray);
+    renderRestDaysButtons();
   };
 
   /**
@@ -608,6 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
       state.currentEmployee = null;
       if (container) container.classList.add("hidden");
       if (deptInput) deptInput.value = "";
+      calculateFormDays();
       return;
     }
 
@@ -1869,7 +1930,7 @@ document.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
 
       // ดึงเวรหยุดประจำสัปดาห์ที่ผู้ใช้เลือก (0=อาทิตย์, ..., 6=เสาร์)
-      const restDays = Array.from(document.querySelectorAll('input[name="emp-rest-day"]:checked')).map(cb => Number(cb.value));
+      const restDays = Array.from(currentModalRestDays);
 
       const payload = {
         emp_id: document.getElementById("emp-modal-id").value.trim(),

@@ -147,7 +147,9 @@ class LeaveAPI {
     let restDays = [0, 6];
     if (Array.isArray(emp.rest_days)) {
       restDays = emp.rest_days.map(Number);
-    } else if (emp.rest_days !== undefined && emp.rest_days !== null && emp.rest_days !== "") {
+    } else if (emp.rest_days === "none" || emp.rest_days === "[]" || emp.rest_days === "-") {
+      restDays = [];
+    } else if (emp.rest_days !== undefined && emp.rest_days !== null && String(emp.rest_days).trim() !== "") {
       restDays = String(emp.rest_days).split(",").map(s => Number(s.trim())).filter(n => !isNaN(n));
     }
     return {
@@ -548,7 +550,9 @@ class LeaveAPI {
     if (employee) {
       if (Array.isArray(employee.rest_days)) {
         restDays = employee.rest_days.map(Number);
-      } else if (employee.rest_days !== undefined && employee.rest_days !== null && employee.rest_days !== "") {
+      } else if (employee.rest_days === "none" || employee.rest_days === "[]" || employee.rest_days === "-") {
+        restDays = [];
+      } else if (employee.rest_days !== undefined && employee.rest_days !== null && String(employee.rest_days).trim() !== "") {
         restDays = String(employee.rest_days).split(",").map(s => Number(s.trim())).filter(n => !isNaN(n));
       }
     }
