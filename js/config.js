@@ -73,15 +73,23 @@ const CONFIG = {
     }
   },
 
-  // แผนกในองค์กร
+  // แผนกในองค์กร (สามารถเพิ่ม/แก้ไข/ลบเองได้ในระบบ)
   DEPARTMENTS: [
-    "ฝ่ายบริหาร (Management)",
-    "ฝ่ายบุคคล (HR)",
-    "ฝ่ายไอทีและพัฒนาระบบ (IT & Software)",
-    "ฝ่ายบัญชีและการเงิน (Finance & Accounting)",
+    "ฝ่ายบริหารจัดการ (Management)",
+    "ฝ่ายบุคคลและธุรการ (HR & Administration)",
+    "ฝ่ายเทคโนโลยีสารสนเทศ (IT & Software Development)",
+    "ฝ่ายบัญชีและการเงิน (Accounting & Finance)",
     "ฝ่ายขายและการตลาด (Sales & Marketing)",
+    "ฝ่ายบริการลูกค้า (Customer Service & Support)",
     "ฝ่ายปฏิบัติการ (Operations)",
-    "ฝ่ายบริการลูกค้า (Customer Support)"
+    "ฝ่ายคลังสินค้าและโลจิสติกส์ (Warehouse & Logistics)",
+    "ฝ่ายจัดซื้อและพัสดุ (Procurement & Purchasing)",
+    "ฝ่ายผลิตและโรงงาน (Production & Manufacturing)",
+    "ฝ่ายควบคุมคุณภาพ (Quality Assurance - QA/QC)",
+    "ฝ่ายซ่อมบำรุงและวิศวกรรม (Engineering & Maintenance)",
+    "ฝ่ายกฎหมายและกำกับดูแล (Legal & Compliance)",
+    "ฝ่ายออกแบบและสื่อสารองค์กร (Design & Corporate Communications)",
+    "ฝ่ายความปลอดภัยและชีวอนามัย (Safety & Environment)"
   ],
 
   // วันหยุดนักขัตฤกษ์ไทยเริ่มต้นประจำปี

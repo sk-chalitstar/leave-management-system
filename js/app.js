@@ -14,8 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
     charts: {
       leaveType: null,
       department: null
-    },
-    activeStatusFilter: "ALL"
+    }
   };
 
   // Date Pickers
@@ -33,13 +32,23 @@ document.addEventListener("DOMContentLoaded", () => {
   loadData();
 
   /**
-   * Real-time Clock (แสดงเวลาจริงแบบวินาทีต่อวินาที)
+   * เรนเดอร์ไอคอน Lucide
+   */
+  function initLucide() {
+    if (window.lucide) {
+      lucide.createIcons();
+    }
+  }
+
+  /**
+   * Real-time Clock (เวลาจริง)
+   * แสดงวันที่ปัจจุบันและเวลาจริงที่เดินวินาทีต่อวินาที
    */
   function initRealTimeClock() {
     const clockEl = document.getElementById("realtime-clock");
     if (!clockEl) return;
 
-    function updateClock() {
+    function tick() {
       const now = new Date();
       const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
       const d = now.getDate();
@@ -52,17 +61,8 @@ document.addEventListener("DOMContentLoaded", () => {
       clockEl.textContent = `${d} ${m} ${y} ${hh}:${mm}:${ss} น.`;
     }
 
-    updateClock();
-    setInterval(updateClock, 1000);
-  }
-
-  /**
-   * เรนเดอร์ไอคอน Lucide
-   */
-  function initLucide() {
-    if (window.lucide) {
-      lucide.createIcons();
-    }
+    tick();
+    setInterval(tick, 1000);
   }
 
   /**
@@ -79,7 +79,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     startDatePicker = flatpickr("#leave-form-start-date", {
       ...config,
-      onChange: () => calculateFormDays()
+      onChange: (selectedDates, dateStr) => {
+        const durationType = document.getElementById("leave-form-duration-type").value;
+        if (durationType === "hourly" && endDatePicker) {
+          endDatePicker.setDate(dateStr, true);
+        }
+        calculateFormDays();
+      }
     });
 
     endDatePicker = flatpickr("#leave-form-end-date", {
@@ -119,6 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderDashboardRecentTable();
       populateEmployeeSelects();
       populateDepartmentSelects();
+      renderLeaveHistoryTable();
       renderEmployeeCards();
       renderHolidaysTable();
       renderReports();
@@ -158,33 +165,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * อัปเดตตัวเลขแจ้งเตือน Pending ในเมนู Sidebar
-   */
-  function updatePendingBadge() {
-    const pendingCount = state.leaveRequests.filter(r => r.status === "Pending").length;
-    const badge = document.getElementById("badge-pending-count");
-    if (badge) {
-      if (pendingCount > 0) {
-        badge.textContent = pendingCount;
-        badge.classList.remove("hidden");
-      } else {
-        badge.classList.add("hidden");
-      }
-    }
-  }
-
-  /**
    * 1. Dashboard: KPIs
    */
   function updateDashboardKPIs() {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = LeaveAPI.formatDateISO(new Date());
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
 
     // กำลังลาในวันนี้ (Approved และวันที่ตรงกับวันนี้)
     const todayLeaves = state.leaveRequests.filter(r => {
       if (r.status !== "Approved") return false;
-      return r.start_date <= todayStr && todayStr <= r.end_date;
+      const s = LeaveAPI.formatDateISO(r.start_date);
+      const e = LeaveAPI.formatDateISO(r.end_date);
+      return s <= todayStr && todayStr <= e;
     }).length;
 
     // คำขอรออนุมัติ
@@ -258,8 +251,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 2. Department Bar Chart
     const deptTotals = {};
-    CONFIG.DEPARTMENTS.forEach(d => {
-      // เอาชื่อย่อมาทำ label เพื่อความกะทัดรัด
+    const depts = window.leaveAPI.getDepartments();
+    depts.forEach(d => {
       const shortName = d.split("(")[0].trim();
       deptTotals[shortName] = 0;
     });
@@ -315,6 +308,8 @@ document.addEventListener("DOMContentLoaded", () => {
     tbody.innerHTML = recent.map(req => {
       const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
       const statusBadge = getStatusBadge(req.status);
+      const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+      const endDMY = LeaveAPI.formatDateDMY(req.end_date);
 
       return `
         <tr class="hover:bg-slate-50 transition-colors">
@@ -326,7 +321,7 @@ document.addEventListener("DOMContentLoaded", () => {
               ${typeInfo.name.split(" ")[0]}
             </span>
           </td>
-          <td class="py-3 px-4 font-mono text-[11px] text-slate-600">${req.start_date} ถึง ${req.end_date}</td>
+          <td class="py-3 px-4 font-mono text-[11px] text-slate-600">${startDMY} ถึง ${endDMY}</td>
           <td class="py-3 px-4 text-center font-bold text-slate-700">${req.total_days}</td>
           <td class="py-3 px-4 text-center">${statusBadge}</td>
           <td class="py-3 px-4 text-right">
@@ -374,6 +369,11 @@ document.addEventListener("DOMContentLoaded", () => {
       filterDeptSelect.innerHTML = `<option value="">-- ทุกแผนก --</option>` + deptOptions;
     }
 
+    const filterHistoryDept = document.getElementById("filter-history-dept");
+    if (filterHistoryDept) {
+      filterHistoryDept.innerHTML = `<option value="">-- ทุกแผนก --</option>` + deptOptions;
+    }
+
     renderDepartmentsList();
   }
 
@@ -390,7 +390,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    container.innerHTML = departments.map((dept, idx) => {
+    container.innerHTML = departments.map(dept => {
       return `
         <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs hover:bg-white transition-colors">
           <span class="font-medium text-slate-800">${escapeHtml(dept)}</span>
@@ -450,7 +450,6 @@ document.addEventListener("DOMContentLoaded", () => {
         depts[idx] = newName.trim();
         window.leaveAPI.saveDepartments(depts);
 
-        // อัปเดตแผนกของพนักงานที่เป็นชื่อเดิมด้วย
         state.employees.forEach(emp => {
           if (emp.department === oldName) {
             emp.department = newName.trim();
@@ -502,7 +501,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (durationType === "hourly") {
       if (hourlyBox) hourlyBox.classList.remove("hidden");
       hours = Number(hourlySelect?.value || 2);
-      // หากเป็นรายชั่วโมง ให้บังคับวันสิ้นสุดตรงกับวันเริ่มต้น
+      
+      // บังคับวันสิ้นสุดให้เท่ากับวันเริ่มต้น
       if (startDate && startDatePicker) {
         endDate = startDate;
         document.getElementById("leave-form-end-date").value = startDate;
@@ -535,7 +535,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    // ตรวจสอบโควตาคงเหลือของพนักงาน
     checkQuotaWarning(workingDays);
     return workingDays;
   }
@@ -604,13 +603,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * 2. แนบเอกสารหลักฐาน (Multi-attachment handling)
+   * แนบเอกสารหลักฐาน (Multi-attachments)
    */
   async function handleFilesUpload(files) {
     if (!files || files.length === 0) return;
 
     for (let file of Array.from(files)) {
-      // ตรวจสอบขนาดไฟล์ไม่เกิน 10MB
       if (file.size > 10 * 1024 * 1024) {
         Swal.fire({
           icon: "warning",
@@ -673,21 +671,21 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   /**
-   * 3. Approvals Table
+   * 2. แท็บประวัติการลา (Leave History - แก้ไขและลบได้)
    */
-  function renderApprovalsTable() {
-    const tbody = document.getElementById("approvals-table-body");
-    const countInfo = document.getElementById("approvals-count-info");
-    const searchTerm = (document.getElementById("filter-search-approvals")?.value || "").toLowerCase().trim();
+  function renderLeaveHistoryTable() {
+    const tbody = document.getElementById("history-table-body");
+    const countSpan = document.getElementById("history-total-count");
+    if (!tbody) return;
+
+    const searchTerm = (document.getElementById("filter-history-search")?.value || "").toLowerCase().trim();
+    const deptFilter = document.getElementById("filter-history-dept")?.value || "";
+    const typeFilter = document.getElementById("filter-history-type")?.value || "";
 
     let filtered = [...state.leaveRequests];
 
-    // Status filter
-    if (state.activeStatusFilter !== "ALL") {
-      filtered = filtered.filter(r => r.status === state.activeStatusFilter);
-    }
-
-    // Search filter
+    if (deptFilter) filtered = filtered.filter(r => r.department === deptFilter);
+    if (typeFilter) filtered = filtered.filter(r => r.leave_type === typeFilter);
     if (searchTerm) {
       filtered = filtered.filter(r => {
         return (
@@ -699,13 +697,12 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    if (countInfo) {
-      countInfo.textContent = `แสดง ${filtered.length} จากทั้งหมด ${state.leaveRequests.length} รายการ`;
+    if (countSpan) {
+      countSpan.textContent = `แสดงทั้งหมด ${filtered.length} รายการ`;
     }
 
-    if (!tbody) return;
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400">ไม่พบข้อมูลคำขอลาตามเงื่อนไขที่เลือก</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-slate-400">ไม่พบประวัติการลา</td></tr>`;
       return;
     }
 
@@ -713,12 +710,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
       const statusBadge = getStatusBadge(req.status);
       const attachmentsCount = (req.attachments && Array.isArray(req.attachments)) ? req.attachments.length : 0;
+      
+      const createdFormatted = LeaveAPI.formatDateTime(req.created_at);
+      const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+      const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+
+      let durationLabel = `${startDMY} ถึง ${endDMY}`;
+      if (req.leave_duration_type === "hourly") {
+        durationLabel = `${startDMY} <span class="text-amber-700 block font-bold text-[10px]">(รายชั่วโมง ${req.leave_hours || ""} ชม.)</span>`;
+      } else if (req.leave_duration_type === "morning") {
+        durationLabel = `${startDMY} <span class="text-blue-600 block text-[10px]">(ครึ่งวันเช้า)</span>`;
+      } else if (req.leave_duration_type === "afternoon") {
+        durationLabel = `${startDMY} <span class="text-blue-600 block text-[10px]">(ครึ่งวันบ่าย)</span>`;
+      }
 
       return `
         <tr class="hover:bg-slate-50 transition-colors">
           <td class="py-3 px-4">
             <span class="font-mono font-bold text-slate-800 block">${req.request_id}</span>
-            <span class="text-[10px] text-slate-400">${new Date(req.created_at).toLocaleDateString('th-TH')}</span>
+            <span class="text-[10px] text-slate-400">${createdFormatted}</span>
           </td>
           <td class="py-3 px-4">
             <span class="font-semibold text-slate-800 block">${escapeHtml(req.emp_name)}</span>
@@ -729,23 +739,33 @@ document.addEventListener("DOMContentLoaded", () => {
               ${typeInfo.name.split(" ")[0]}
             </span>
           </td>
-          <td class="py-3 px-4 font-mono text-xs text-slate-600">
-            ${req.start_date} ถึง ${req.end_date}
-            ${req.leave_duration_type !== "full" ? `<span class="block text-[10px] text-blue-600">(${req.leave_duration_type === "morning" ? "ครึ่งวันเช้า" : "ครึ่งวันบ่าย"})</span>` : ""}
+          <td class="py-3 px-4 font-mono text-xs text-slate-700">
+            ${durationLabel}
           </td>
-          <td class="py-3 px-4 text-center font-bold text-slate-700">${req.total_days}</td>
+          <td class="py-3 px-4 text-center font-bold text-slate-800">${req.total_days}</td>
+          <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${escapeHtml(req.reason)}">
+            ${escapeHtml(req.reason)}
+          </td>
           <td class="py-3 px-4">
             ${attachmentsCount > 0 
-              ? `<span class="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
-                  <i data-lucide="paperclip" class="w-3.5 h-3.5"></i> ${attachmentsCount} ไฟล์
+              ? `<span class="inline-flex items-center gap-1 text-[11px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  <i data-lucide="paperclip" class="w-3 h-3"></i> ${attachmentsCount} ไฟล์
                 </span>` 
-              : `<span class="text-slate-400 text-[11px]">ไม่มี</span>`}
+              : `<span class="text-slate-400 text-[11px]">-</span>`}
           </td>
           <td class="py-3 px-4 text-center">${statusBadge}</td>
           <td class="py-3 px-4 text-right">
-            <button onclick="window.viewLeaveDetail('${req.request_id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors">
-              ตรวจสอบ / จัดการ
-            </button>
+            <div class="flex items-center justify-end gap-1.5">
+              <button onclick="window.openEditLeaveModal('${req.request_id}')" class="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="แก้ไขการลา">
+                <i data-lucide="edit-3" class="w-4 h-4"></i>
+              </button>
+              <button onclick="window.confirmDeleteLeave('${req.request_id}')" class="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors" title="ลบรายการลา">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </button>
+              <button onclick="window.viewLeaveDetail('${req.request_id}')" class="p-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors" title="ดูรายละเอียด / พิมพ์ใบลา">
+                <i data-lucide="printer" class="w-4 h-4"></i>
+              </button>
+            </div>
           </td>
         </tr>
       `;
@@ -755,7 +775,63 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * ดูรายละเอียดคำขอและอนุมัติใน Modal
+   * เปิด Modal แก้ไขข้อมูลการลา
+   */
+  window.openEditLeaveModal = function(requestId) {
+    const req = state.leaveRequests.find(r => r.request_id === requestId);
+    if (!req) return;
+
+    document.getElementById("edit-leave-modal-id").textContent = req.request_id;
+    document.getElementById("edit-leave-id").value = req.request_id;
+    document.getElementById("edit-leave-emp-id").value = req.emp_id;
+    document.getElementById("edit-leave-emp-name").textContent = `${req.emp_id} - ${req.emp_name}`;
+    document.getElementById("edit-leave-emp-dept").textContent = req.department;
+
+    document.getElementById("edit-leave-type").value = req.leave_type;
+    document.getElementById("edit-leave-duration-type").value = req.leave_duration_type || "full";
+    document.getElementById("edit-leave-start-date").value = LeaveAPI.formatDateISO(req.start_date);
+    document.getElementById("edit-leave-end-date").value = LeaveAPI.formatDateISO(req.end_date);
+    document.getElementById("edit-leave-reason").value = req.reason || "";
+
+    const hourlyBox = document.getElementById("edit-hourly-box");
+    if (req.leave_duration_type === "hourly") {
+      hourlyBox.classList.remove("hidden");
+      document.getElementById("edit-leave-hours").value = req.leave_hours || 2;
+      document.getElementById("edit-leave-time-range").value = req.leave_time_range || "";
+    } else {
+      hourlyBox.classList.add("hidden");
+    }
+
+    document.getElementById("modal-edit-leave").classList.remove("hidden");
+  };
+
+  /**
+   * ยืนยันการลบคำขอลา (Delete Leave)
+   */
+  window.confirmDeleteLeave = async function(requestId) {
+    const confirm = await Swal.fire({
+      title: "ยืนยันการลบรายการลา?",
+      text: `รหัสคำขอ ${requestId} จะถูกลบออกจากระบบ และคืนสิทธิ์วันลาให้พนักงาน`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#e11d48",
+      confirmButtonText: "ใช่, ต้องการลบ",
+      cancelButtonText: "ยกเลิก"
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        await window.leaveAPI.deleteLeaveRequest(requestId);
+        Swal.fire({ icon: "success", title: "ลบรายการลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
+        await loadData();
+      } catch (err) {
+        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+      }
+    }
+  };
+
+  /**
+   * ดูรายละเอียดคำขอและสั่งพิมพ์ใบลาใน Modal
    */
   window.viewLeaveDetail = function(requestId) {
     const req = state.leaveRequests.find(r => r.request_id === requestId);
@@ -764,7 +840,7 @@ document.addEventListener("DOMContentLoaded", () => {
     state.selectedLeaveRequest = req;
 
     document.getElementById("detail-modal-req-id").textContent = req.request_id;
-    document.getElementById("detail-modal-created-at").textContent = "ยื่นคำขอเมื่อ: " + new Date(req.created_at).toLocaleString("th-TH");
+    document.getElementById("detail-modal-created-at").textContent = "ยื่นคำขอเมื่อ: " + LeaveAPI.formatDateTime(req.created_at);
     document.getElementById("detail-modal-emp-name").textContent = req.emp_name;
     document.getElementById("detail-modal-emp-id").textContent = "รหัส: " + req.emp_id;
     document.getElementById("detail-modal-dept").textContent = req.department;
@@ -772,29 +848,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
     document.getElementById("detail-modal-type").textContent = typeInfo.name;
     document.getElementById("detail-modal-days").textContent = `${req.total_days} วันทำการ`;
-    document.getElementById("detail-modal-date-range").textContent = `${req.start_date} ถึง ${req.end_date} (${req.leave_duration_type === "full" ? "เต็มวัน" : (req.leave_duration_type === "morning" ? "ครึ่งวันเช้า" : "ครึ่งวันบ่าย")})`;
+    
+    const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+    const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+    document.getElementById("detail-modal-date-range").textContent = `${startDMY} ถึง ${endDMY}`;
     document.getElementById("detail-modal-reason").textContent = req.reason || "-";
 
-    // Status box
     const statusBox = document.getElementById("detail-modal-status-box");
     const statusSpan = document.getElementById("detail-modal-status");
     const approverSpan = document.getElementById("detail-modal-approver");
     const approverLabel = document.getElementById("detail-modal-approver-label");
 
     statusSpan.innerHTML = getStatusBadge(req.status);
-    if (req.status === "Approved") {
-      approverLabel.textContent = "อนุมัติโดย:";
-      approverSpan.textContent = req.approved_by || "HR";
-      statusBox.className = "p-3 rounded-xl border border-emerald-200 bg-emerald-50 flex items-center justify-between";
-    } else if (req.status === "Rejected") {
-      approverLabel.textContent = "ไม่อนุมัติโดย / เหตุผล:";
-      approverSpan.textContent = `${req.approved_by || "HR"} (${req.rejection_reason || "ไม่ได้ระบุเหตุผล"})`;
-      statusBox.className = "p-3 rounded-xl border border-rose-200 bg-rose-50 flex items-center justify-between";
-    } else {
-      approverLabel.textContent = "สถานะ:";
-      approverSpan.textContent = "รอผู้มีอำนาจตรวจสอบ";
-      statusBox.className = "p-3 rounded-xl border border-amber-200 bg-amber-50 flex items-center justify-between";
-    }
+    approverLabel.textContent = "สถานะ:";
+    approverSpan.textContent = req.status;
+    statusBox.className = "p-3 rounded-xl border border-emerald-200 bg-emerald-50 flex items-center justify-between";
 
     // Attachments Preview
     const attachmentsContainer = document.getElementById("detail-modal-attachments");
@@ -822,18 +890,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }).join("");
     }
 
-    // ปรับปุ่มการอนุมัติ (หากอนุมัติหรือไม่อนุมัติไปแล้ว ให้แสดงหรือซ่อน)
-    const actionsGroup = document.getElementById("approval-actions-group");
-    const rejectionInputGroup = document.getElementById("rejection-input-group");
-    if (rejectionInputGroup) rejectionInputGroup.classList.add("hidden");
-
-    if (req.status === "Pending") {
-      actionsGroup.classList.remove("hidden");
-    } else {
-      actionsGroup.classList.add("hidden");
-    }
-
-    // แสดง Modal
     document.getElementById("modal-leave-detail").classList.remove("hidden");
     initLucide();
   };
@@ -868,8 +924,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     grid.innerHTML = filtered.map(emp => {
       const balances = window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests);
-
-      // คำนวณเปอร์เซ็นต์ที่ใช้ไปของพักร้อน
       const annualPercent = balances.annual.quota > 0 
         ? Math.min(100, Math.round((balances.annual.used / balances.annual.quota) * 100)) 
         : 0;
@@ -939,9 +993,6 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   }
 
-  /**
-   * แก้ไขข้อมูลพนักงาน
-   */
   window.editEmployee = function(empId) {
     const emp = state.employees.find(e => String(e.emp_id).trim() === String(empId).trim());
     if (!emp) return;
@@ -963,9 +1014,6 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   };
 
-  /**
-   * ยืนยันการลบพนักงาน
-   */
   window.confirmDeleteEmployee = async function(empId) {
     const confirm = await Swal.fire({
       icon: "warning",
@@ -989,15 +1037,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  /**
-   * ดูประวัติการลาของพนักงานรายบุคคล โดยเปิด Tab รายงานแล้วกรองให้อัตโนมัติ
-   */
   window.viewEmployeeLeaveHistory = function(empId) {
-    switchTab("tab-reports");
-    const reportEmpSelect = document.getElementById("report-filter-emp");
-    if (reportEmpSelect) {
-      reportEmpSelect.value = empId;
-      renderReports();
+    switchTab("tab-leave-history");
+    const historySearch = document.getElementById("filter-history-search");
+    if (historySearch) {
+      historySearch.value = empId;
+      renderLeaveHistoryTable();
     }
   };
 
@@ -1014,7 +1059,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // เรียงตามวันที่ (ตัด Timestamp ก่อนนำมา sort)
     const sorted = [...state.holidays].sort((a, b) => {
       const dateA = LeaveAPI.formatDateISO(a.holiday_date);
       const dateB = LeaveAPI.formatDateISO(b.holiday_date);
@@ -1023,10 +1067,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     tbody.innerHTML = sorted.map(h => {
       const cleanISO = LeaveAPI.formatDateISO(h.holiday_date);
-      // รูปแบบ วัน/เดือน/ปี (DD/MM/YYYY)
       const dmy = LeaveAPI.formatDateDMY(cleanISO);
       
-      // แปลงเป็นชื่อเดือนไทยแบบย่อ
       let thaiLabel = "";
       try {
         const dObj = new Date(cleanISO + "T00:00:00");
@@ -1060,9 +1102,6 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   }
 
-  /**
-   * ยืนยันการลบวันหยุด
-   */
   window.confirmDeleteHoliday = async function(id, holidayDate, holidayName) {
     const confirm = await Swal.fire({
       title: "ยืนยันการลบวันหยุด?",
@@ -1100,8 +1139,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let filtered = [...state.leaveRequests];
 
-    if (startDate) filtered = filtered.filter(r => r.start_date >= startDate);
-    if (endDate) filtered = filtered.filter(r => r.end_date <= endDate);
+    if (startDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.start_date) >= startDate);
+    if (endDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.end_date) <= endDate);
     if (empId) filtered = filtered.filter(r => String(r.emp_id).trim() === String(empId).trim());
     if (leaveType) filtered = filtered.filter(r => r.leave_type === leaveType);
 
@@ -1116,12 +1155,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!tbody) return;
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400">ไม่พบประวัติการลาตามเงื่อนไขที่เลือก</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">ไม่พบประวัติการลาตามเงื่อนไขที่เลือก</td></tr>`;
       return;
     }
 
     tbody.innerHTML = filtered.map((req, index) => {
       const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
+      const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+      const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+
       return `
         <tr>
           <td class="py-2.5 px-3 text-center">${index + 1}</td>
@@ -1129,7 +1171,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <td class="py-2.5 px-3 font-semibold">${escapeHtml(req.emp_name)}</td>
           <td class="py-2.5 px-3">${escapeHtml(req.department)}</td>
           <td class="py-2.5 px-3">${typeInfo.name.split(" ")[0]}</td>
-          <td class="py-2.5 px-3 font-mono text-[11px]">${LeaveAPI.formatDateDMY(req.start_date)} ถึง ${LeaveAPI.formatDateDMY(req.end_date)}</td>
+          <td class="py-2.5 px-3 font-mono text-[11px]">${startDMY} ถึง ${endDMY}</td>
           <td class="py-2.5 px-3 text-center font-bold">${req.total_days}</td>
           <td class="py-2.5 px-3 text-slate-600 max-w-xs truncate">${escapeHtml(req.reason)}</td>
           <td class="py-2.5 px-3 text-center font-semibold ${req.status === 'Approved' ? 'text-emerald-700' : (req.status === 'Rejected' ? 'text-rose-700' : 'text-amber-700')}">${req.status}</td>
@@ -1145,9 +1187,6 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   }
 
-  /**
-   * Export รายงานเป็น Excel (.xlsx) ด้วย SheetJS
-   */
   function exportToExcel() {
     const table = document.querySelector("#printable-report-section table");
     if (!table) return;
@@ -1157,9 +1196,6 @@ document.addEventListener("DOMContentLoaded", () => {
     XLSX.writeFile(wb, `Leave_History_Report_${today}.xlsx`);
   }
 
-  /**
-   * พิมพ์ใบลาทางการ (Official Printable Leave Slip)
-   */
   function openPrintableLeaveSlip(req) {
     if (!req) return;
 
@@ -1168,19 +1204,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
 
     document.getElementById("slip-req-id").textContent = req.request_id;
-    document.getElementById("slip-date").textContent = new Date(req.created_at).toLocaleDateString("th-TH");
+    document.getElementById("slip-date").textContent = LeaveAPI.formatDateDMY(req.created_at);
     document.getElementById("slip-emp-name").textContent = req.emp_name;
     document.getElementById("slip-emp-id").textContent = req.emp_id;
     document.getElementById("slip-emp-dept").textContent = req.department;
     document.getElementById("slip-emp-position").textContent = emp ? emp.position : "-";
 
     document.getElementById("slip-leave-type").textContent = typeInfo.name;
-    document.getElementById("slip-leave-days").textContent = `${req.total_days} วันทำการ (${req.leave_duration_type === "full" ? "เต็มวัน" : (req.leave_duration_type === "morning" ? "ครึ่งวันเช้า" : "ครึ่งวันบ่าย")})`;
-    document.getElementById("slip-leave-start").textContent = req.start_date;
-    document.getElementById("slip-leave-end").textContent = req.end_date;
+    document.getElementById("slip-leave-days").textContent = `${req.total_days} วันทำการ`;
+    document.getElementById("slip-leave-start").textContent = LeaveAPI.formatDateDMY(req.start_date);
+    document.getElementById("slip-leave-end").textContent = LeaveAPI.formatDateDMY(req.end_date);
     document.getElementById("slip-leave-reason").textContent = req.reason || "-";
 
-    // Balances row in slip
     const balContainer = document.getElementById("slip-leave-balances");
     if (balances && balContainer) {
       balContainer.innerHTML = `
@@ -1207,9 +1242,6 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   }
 
-  /**
-   * Helper: Status Badge HTML
-   */
   function getStatusBadge(status) {
     if (status === "Approved") {
       return `<span class="badge-status badge-status-approved"><i data-lucide="check" class="w-3 h-3"></i> อนุมัติแล้ว</span>`;
@@ -1222,18 +1254,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  /**
-   * สลับแท็บ (Tab Navigation)
-   */
   function switchTab(targetTabId) {
-    // ซ่อนทุก Tab
     document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.add("hidden"));
     document.querySelectorAll(".nav-item").forEach(item => {
       item.classList.remove("active", "bg-blue-600", "text-white");
       item.classList.add("text-slate-400");
     });
 
-    // แสดง Tab ที่เลือก
     const activePane = document.getElementById(targetTabId);
     if (activePane) activePane.classList.remove("hidden");
 
@@ -1243,7 +1270,6 @@ document.addEventListener("DOMContentLoaded", () => {
       activeBtn.classList.remove("text-slate-400");
     }
 
-    // เปลี่ยน Title หัวเว็บ
     const pageTitle = document.getElementById("page-title");
     const pageSubtitle = document.getElementById("page-subtitle");
 
@@ -1256,6 +1282,11 @@ document.addEventListener("DOMContentLoaded", () => {
       case "tab-leave-request":
         pageTitle.textContent = "บันทึกยื่นคำขอลา";
         pageSubtitle.textContent = "ระบบคำนวณวันทำงาน หักวันหยุดนักขัตฤกษ์ และแนบเอกสารหลักฐาน";
+        break;
+      case "tab-leave-history":
+        pageTitle.textContent = "ประวัติการลา";
+        pageSubtitle.textContent = "ตรวจสอบ แก้ไข หรือลบรายการลาที่บันทึกผิดพลาด";
+        renderLeaveHistoryTable();
         break;
       case "tab-employee-balances":
         pageTitle.textContent = "สิทธิ์วันลาพนักงาน";
@@ -1281,11 +1312,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   }
 
-  /**
-   * ผูก Event Handlers
-   */
   function initEventHandlers() {
-    // Navigation Tabs
     document.querySelectorAll(".nav-item").forEach(btn => {
       btn.addEventListener("click", () => {
         const tab = btn.getAttribute("data-tab");
@@ -1293,7 +1320,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // Mobile Menu Toggle
     const mobileMenuBtn = document.getElementById("mobile-menu-btn");
     const sidebarNav = document.getElementById("sidebar-nav");
     if (mobileMenuBtn && sidebarNav) {
@@ -1302,12 +1328,10 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    // Quick New Leave Button
     document.getElementById("btn-quick-new-leave")?.addEventListener("click", () => {
       switchTab("tab-leave-request");
     });
 
-    // Refresh Data Button
     document.getElementById("btn-refresh-data")?.addEventListener("click", async () => {
       const btn = document.getElementById("btn-refresh-data");
       btn.classList.add("opacity-50", "pointer-events-none");
@@ -1323,30 +1347,22 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // Goto Reports from Dashboard
     document.querySelector(".btn-goto-reports")?.addEventListener("click", () => {
-      switchTab("tab-reports");
+      switchTab("tab-leave-history");
     });
 
-    // Departments Modal Events
-    document.getElementById("btn-open-departments-modal")?.addEventListener("click", () => {
-      renderDepartmentsList();
-      document.getElementById("modal-departments")?.classList.remove("hidden");
-      initLucide();
+    document.getElementById("leave-form-emp-select")?.addEventListener("change", (e) => {
+      updateEmployeeLiveQuota(e.target.value);
     });
 
-    document.getElementById("btn-add-department")?.addEventListener("click", () => {
-      window.addDepartment();
+    document.getElementById("leave-form-duration-type")?.addEventListener("change", () => {
+      calculateFormDays();
     });
 
-    document.getElementById("input-new-department")?.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        window.addDepartment();
-      }
+    document.getElementById("leave-form-type")?.addEventListener("change", () => {
+      calculateFormDays();
     });
 
-    // Hourly Leave Inputs Change
     document.getElementById("leave-form-hours-select")?.addEventListener("change", () => {
       calculateFormDays();
     });
@@ -1354,66 +1370,6 @@ document.addEventListener("DOMContentLoaded", () => {
       calculateFormDays();
     });
     document.getElementById("leave-form-time-end")?.addEventListener("change", () => {
-      calculateFormDays();
-    });
-
-    // Clean Duplicate Holidays
-    document.getElementById("btn-clean-duplicate-holidays")?.addEventListener("click", async () => {
-      const confirm = await Swal.fire({
-        title: "ลบวันหยุดที่ซ้ำซ้อนกัน?",
-        text: "ระบบจะตรวจสอบและลบแถวที่ชื่อและวันที่ตรงกันออก ให้เหลือเพียง 1 รายการ",
-        icon: "question",
-        showCancelButton: true,
-        confirmButtonText: "ลบรายการซ้ำ",
-        cancelButtonText: "ยกเลิก"
-      });
-
-      if (confirm.isConfirmed) {
-        try {
-          const res = await window.leaveAPI.cleanDuplicateHolidays();
-          Swal.fire({ icon: "success", title: "สำเร็จ", text: res.message, timer: 1500, showConfirmButton: false });
-          await loadData();
-        } catch (err) {
-          Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
-        }
-      }
-    });
-
-    // Clear All Holidays
-    document.getElementById("btn-clear-all-holidays")?.addEventListener("click", async () => {
-      const confirm = await Swal.fire({
-        title: "ต้องการล้างวันหยุดทั้งหมด?",
-        text: "วันหยุดทั้งหมดในระบบจะถูกลบออก (คุณสามารถกดโหลดวันหยุดไทยมาตรฐานใหม่ได้ตลอดเวลา)",
-        icon: "warning",
-        showCancelButton: true,
-        confirmButtonColor: "#e11d48",
-        confirmButtonText: "ล้างทั้งหมด",
-        cancelButtonText: "ยกเลิก"
-      });
-
-      if (confirm.isConfirmed) {
-        try {
-          await window.leaveAPI.clearAllHolidays();
-          Swal.fire({ icon: "success", title: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
-          await loadData();
-        } catch (err) {
-          Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
-        }
-      }
-    });
-
-    // Employee Selection in Leave Form
-    document.getElementById("leave-form-emp-select")?.addEventListener("change", (e) => {
-      updateEmployeeLiveQuota(e.target.value);
-    });
-
-    // Duration Type Change (Full vs Half Day)
-    document.getElementById("leave-form-duration-type")?.addEventListener("change", () => {
-      calculateFormDays();
-    });
-
-    // Leave Type Change
-    document.getElementById("leave-form-type")?.addEventListener("change", () => {
       calculateFormDays();
     });
 
@@ -1499,13 +1455,12 @@ document.addEventListener("DOMContentLoaded", () => {
           confirmButtonText: "ตกลง"
         });
 
-        // ล้างฟอร์ม
         document.getElementById("form-leave-request").reset();
         state.tempAttachments = [];
         renderAttachmentsPreview();
         updateEmployeeLiveQuota(null);
         await loadData();
-        switchTab("tab-reports");
+        switchTab("tab-leave-history");
       } catch (err) {
         Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการส่งคำขอ", text: err.message });
       } finally {
@@ -1515,45 +1470,96 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Approvals: Status Filter buttons
-    document.querySelectorAll(".filter-status-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".filter-status-btn").forEach(b => {
-          b.classList.remove("active", "bg-blue-600", "text-white");
-          b.classList.add("text-slate-600");
-        });
-        btn.classList.add("active", "bg-blue-600", "text-white");
-        btn.classList.remove("text-slate-600");
+    // Form Edit Leave Submit
+    document.getElementById("form-edit-leave")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const requestId = document.getElementById("edit-leave-id").value;
+      const durationType = document.getElementById("edit-leave-duration-type").value;
+      let hours = 0;
+      let timeRange = "";
+      let totalDays = 1;
 
-        state.activeStatusFilter = btn.getAttribute("data-status");
-        renderApprovalsTable();
-      });
+      const startDate = document.getElementById("edit-leave-start-date").value;
+      const endDate = document.getElementById("edit-leave-end-date").value;
+
+      if (durationType === "hourly") {
+        hours = Number(document.getElementById("edit-leave-hours").value || 2);
+        timeRange = document.getElementById("edit-leave-time-range").value.trim();
+        totalDays = Math.round((hours / 8) * 100) / 100;
+      } else {
+        totalDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays);
+      }
+
+      const payload = {
+        request_id: requestId,
+        leave_type: document.getElementById("edit-leave-type").value,
+        leave_duration_type: durationType,
+        leave_hours: hours,
+        leave_time_range: timeRange,
+        start_date: startDate,
+        end_date: endDate,
+        total_days: totalDays,
+        reason: document.getElementById("edit-leave-reason").value.trim()
+      };
+
+      try {
+        await window.leaveAPI.updateLeaveRequest(payload);
+        Swal.fire({ icon: "success", title: "แก้ไขข้อมูลการลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
+        document.getElementById("modal-edit-leave").classList.add("hidden");
+        await loadData();
+      } catch (err) {
+        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+      }
     });
 
-    // Approvals: Search input
-    document.getElementById("filter-search-approvals")?.addEventListener("input", () => {
-      renderApprovalsTable();
+    document.getElementById("edit-leave-duration-type")?.addEventListener("change", (e) => {
+      const box = document.getElementById("edit-hourly-box");
+      if (e.target.value === "hourly") {
+        box.classList.remove("hidden");
+        document.getElementById("edit-leave-end-date").value = document.getElementById("edit-leave-start-date").value;
+      } else {
+        box.classList.add("hidden");
+      }
     });
 
-    // Approvals: Approve Button in Modal
-    document.getElementById("btn-approve-leave")?.addEventListener("click", async () => {
-      if (!state.selectedLeaveRequest) return;
+    // History Filters
+    document.getElementById("filter-history-search")?.addEventListener("input", () => renderLeaveHistoryTable());
+    document.getElementById("filter-history-dept")?.addEventListener("change", () => renderLeaveHistoryTable());
+    document.getElementById("filter-history-type")?.addEventListener("change", () => renderLeaveHistoryTable());
 
+    // Departments Modal Events
+    document.getElementById("btn-open-departments-modal")?.addEventListener("click", () => {
+      renderDepartmentsList();
+      document.getElementById("modal-departments")?.classList.remove("hidden");
+      initLucide();
+    });
+
+    document.getElementById("btn-add-department")?.addEventListener("click", () => {
+      window.addDepartment();
+    });
+
+    document.getElementById("input-new-department")?.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        window.addDepartment();
+      }
+    });
+
+    // Clean Duplicate Holidays
+    document.getElementById("btn-clean-duplicate-holidays")?.addEventListener("click", async () => {
       const confirm = await Swal.fire({
-        title: "ยืนยันการอนุมัติคำขอลา?",
-        text: `รหัสคำขอ: ${state.selectedLeaveRequest.request_id}`,
+        title: "ลบวันหยุดที่ซ้ำซ้อนกัน?",
+        text: "ระบบจะตรวจสอบและลบแถวที่ชื่อและวันที่ตรงกันออก ให้เหลือเพียง 1 รายการ",
         icon: "question",
         showCancelButton: true,
-        confirmButtonColor: "#059669",
-        confirmButtonText: "อนุมัติ",
+        confirmButtonText: "ลบรายการซ้ำ",
         cancelButtonText: "ยกเลิก"
       });
 
       if (confirm.isConfirmed) {
         try {
-          await window.leaveAPI.updateLeaveStatus(state.selectedLeaveRequest.request_id, "Approved", "HR Manager", "");
-          Swal.fire({ icon: "success", title: "อนุมัติคำขอลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
-          document.getElementById("modal-leave-detail").classList.add("hidden");
+          const res = await window.leaveAPI.cleanDuplicateHolidays();
+          Swal.fire({ icon: "success", title: "สำเร็จ", text: res.message, timer: 1500, showConfirmButton: false });
           await loadData();
         } catch (err) {
           Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
@@ -1561,28 +1567,22 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Approvals: Reject Button in Modal
-    document.getElementById("btn-reject-leave")?.addEventListener("click", async () => {
-      if (!state.selectedLeaveRequest) return;
-
-      const { value: reason } = await Swal.fire({
-        title: "ระบุเหตุผลที่ไม่อนุมัติ",
-        input: "text",
-        inputPlaceholder: "เช่น งานเร่งด่วน หรือ วันลาไม่เพียงพอ...",
+    // Clear All Holidays
+    document.getElementById("btn-clear-all-holidays")?.addEventListener("click", async () => {
+      const confirm = await Swal.fire({
+        title: "ต้องการล้างวันหยุดทั้งหมด?",
+        text: "วันหยุดทั้งหมดในระบบจะถูกลบออก (คุณสามารถกดโหลดวันหยุดไทยมาตรฐานใหม่ได้ตลอดเวลา)",
+        icon: "warning",
         showCancelButton: true,
         confirmButtonColor: "#e11d48",
-        confirmButtonText: "ยืนยันไม่อนุมัติ",
-        cancelButtonText: "ยกเลิก",
-        inputValidator: (value) => {
-          if (!value) return "กรุณาระบุเหตุผลที่ไม่อนุมัติ!";
-        }
+        confirmButtonText: "ล้างทั้งหมด",
+        cancelButtonText: "ยกเลิก"
       });
 
-      if (reason) {
+      if (confirm.isConfirmed) {
         try {
-          await window.leaveAPI.updateLeaveStatus(state.selectedLeaveRequest.request_id, "Rejected", "HR Manager", reason);
-          Swal.fire({ icon: "success", title: "บันทึกสถานะไม่อนุมัติแล้ว", timer: 1500, showConfirmButton: false });
-          document.getElementById("modal-leave-detail").classList.add("hidden");
+          await window.leaveAPI.clearAllHolidays();
+          Swal.fire({ icon: "success", title: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
           await loadData();
         } catch (err) {
           Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
@@ -1645,10 +1645,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // Save Holiday Form
     document.getElementById("form-holiday")?.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const rawDate = document.getElementById("holiday-modal-date").value;
+      const cleanDate = LeaveAPI.formatDateISO(rawDate);
       const payload = {
-        holiday_date: document.getElementById("holiday-modal-date").value,
+        holiday_date: cleanDate,
         name: document.getElementById("holiday-modal-name").value.trim(),
-        year: new Date(document.getElementById("holiday-modal-date").value).getFullYear()
+        year: Number(cleanDate.slice(0, 4))
       };
 
       try {
@@ -1737,7 +1739,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Close Modals
     document.querySelectorAll(".btn-close-modal").forEach(btn => {
       btn.addEventListener("click", () => {
-        document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments").forEach(m => m.classList.add("hidden"));
+        document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments, #modal-edit-leave").forEach(m => m.classList.add("hidden"));
       });
     });
   }

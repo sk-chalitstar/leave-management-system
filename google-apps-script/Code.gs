@@ -93,6 +93,14 @@ function doPost(e) {
         result = handleUpdateLeaveStatus(ss, postData.payload);
         break;
 
+      case "updateLeaveRequest":
+        result = handleUpdateLeaveRequest(ss, postData.payload);
+        break;
+
+      case "deleteLeaveRequest":
+        result = handleDeleteLeaveRequest(ss, postData.payload);
+        break;
+
       case "saveEmployee":
         result = handleSaveEmployee(ss, postData.payload);
         break;
@@ -421,6 +429,57 @@ function handleUpdateLeaveStatus(ss, payload) {
     success: true,
     message: `อัปเดตสถานะคำขอลา ${requestId} เป็น "${newStatus}" เรียบร้อยแล้ว`
   };
+}
+
+/**
+ * แก้ไขข้อมูลคำขอลา (Edit Leave Request)
+ */
+function handleUpdateLeaveRequest(ss, payload) {
+  const sheet = ss.getSheetByName("LeaveRequests");
+  const data = sheet.getDataRange().getValues();
+  const requestId = payload.request_id;
+
+  let foundRow = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(requestId).trim()) {
+      foundRow = i + 1;
+      break;
+    }
+  }
+
+  if (foundRow === -1) {
+    return { success: false, message: "ไม่พบรหัสคำขอนี้ในระบบ: " + requestId };
+  }
+
+  // Update specific fields:
+  // 5: leave_type, 6: start_date, 7: end_date, 8: leave_duration_type, 9: total_days, 10: reason, 16: updated_at
+  if (payload.leave_type) sheet.getRange(foundRow, 5).setValue(payload.leave_type);
+  if (payload.start_date) sheet.getRange(foundRow, 6).setValue(payload.start_date);
+  if (payload.end_date) sheet.getRange(foundRow, 7).setValue(payload.end_date);
+  if (payload.leave_duration_type) sheet.getRange(foundRow, 8).setValue(payload.leave_duration_type);
+  if (payload.total_days !== undefined) sheet.getRange(foundRow, 9).setValue(Number(payload.total_days));
+  if (payload.reason) sheet.getRange(foundRow, 10).setValue(payload.reason);
+  sheet.getRange(foundRow, 16).setValue(new Date().toISOString());
+
+  return { success: true, message: "แก้ไขข้อมูลคำขอลาเรียบร้อยแล้ว" };
+}
+
+/**
+ * ลบคำขอลา (Delete Leave Request)
+ */
+function handleDeleteLeaveRequest(ss, payload) {
+  const sheet = ss.getSheetByName("LeaveRequests");
+  const data = sheet.getDataRange().getValues();
+  const requestId = payload.request_id;
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(requestId).trim()) {
+      sheet.deleteRow(i + 1);
+      return { success: true, message: "ลบคำขอลาสำเร็จ" };
+    }
+  }
+
+  return { success: false, message: "ไม่พบคำขอนี้ในระบบ" };
 }
 
 /**

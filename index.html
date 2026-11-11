@@ -81,6 +81,11 @@
         <span>บันทึกยื่นคำขอลา</span>
       </button>
 
+      <button class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-white hover:bg-slate-800" data-tab="tab-leave-history">
+        <i data-lucide="history" class="w-4 h-4"></i>
+        <span>ประวัติการลา</span>
+      </button>
+
       <button class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-white hover:bg-slate-800" data-tab="tab-employee-balances">
         <i data-lucide="users" class="w-4 h-4"></i>
         <span>สิทธิ์วันลาพนักงาน</span>
@@ -345,12 +350,47 @@
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">ช่วงเวลาที่ลา</label>
-                  <select id="leave-form-duration-type" class="w-full text-xs rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 p-2.5 border bg-white">
+                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">ช่วงเวลาที่ลา <span class="text-rose-500">*</span></label>
+                  <select id="leave-form-duration-type" class="w-full text-xs rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 p-2.5 border bg-white font-medium text-slate-800">
                     <option value="full">เต็มวัน (Full Day)</option>
                     <option value="morning">ครึ่งวันเช้า (08:30 - 12:00 น. = 0.5 วัน)</option>
                     <option value="afternoon">ครึ่งวันบ่าย (13:00 - 17:30 น. = 0.5 วัน)</option>
+                    <option value="hourly">⏱️ ลาเป็นรายชั่วโมง (Hourly Leave)</option>
                   </select>
+                </div>
+              </div>
+
+              <!-- Hourly Leave Specific Options (แสดงเมื่อเลือก "ลาเป็นรายชั่วโมง") -->
+              <div id="hourly-leave-options" class="hidden bg-amber-50/80 border border-amber-300 rounded-xl p-4 space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                    <i data-lucide="timer" class="w-4 h-4 text-amber-600"></i>
+                    ระบุรายละเอียดการลาเป็นรายชั่วโมง (1 วันทำงาน = 8 ชั่วโมง)
+                  </span>
+                  <span class="text-xs text-amber-800 font-bold bg-amber-100 px-2.5 py-1 rounded-md border border-amber-200" id="hourly-equiv-text">2 ชม. = 0.25 วันทำการ</span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-700 mb-1">จำนวนชั่วโมงที่ลา <span class="text-rose-500">*</span></label>
+                    <select id="leave-form-hours-select" class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 p-2 border bg-white font-bold text-amber-900">
+                      <option value="1">1 ชั่วโมง (เทียบเท่า 0.13 วัน)</option>
+                      <option value="2" selected>2 ชั่วโมง (เทียบเท่า 0.25 วัน)</option>
+                      <option value="3">3 ชั่วโมง (เทียบเท่า 0.38 วัน)</option>
+                      <option value="4">4 ชั่วโมง (เทียบเท่า 0.50 วัน)</option>
+                      <option value="5">5 ชั่วโมง (เทียบเท่า 0.63 วัน)</option>
+                      <option value="6">6 ชั่วโมง (เทียบเท่า 0.75 วัน)</option>
+                      <option value="7">7 ชั่วโมง (เทียบเท่า 0.88 วัน)</option>
+                      <option value="8">8 ชั่วโมง (เทียบเท่า 1.00 วัน)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-700 mb-1">เวลาเริ่มลา</label>
+                    <input type="time" id="leave-form-time-start" value="09:00" class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 p-2 border bg-white">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-700 mb-1">เวลาสิ้นสุดลา</label>
+                    <input type="time" id="leave-form-time-end" value="11:00" class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 p-2 border bg-white">
+                  </div>
                 </div>
               </div>
 
@@ -425,6 +465,59 @@
               </button>
             </div>
           </form>
+        </div>
+      </section>
+
+      <!-- ==================== TAB: LEAVE HISTORY (ประวัติการลา - แก้ไขและลบได้) ==================== -->
+      <section id="tab-leave-history" class="tab-pane hidden space-y-5">
+        <!-- Filter Toolbar -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center flex-wrap gap-3 w-full md:w-auto">
+            <div class="relative w-full sm:w-64">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+              <input type="text" id="filter-history-search" placeholder="ค้นหารหัส, ชื่อพนักงาน, แผนก..." class="w-full text-xs pl-9 pr-3 py-2 rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 border">
+            </div>
+            <select id="filter-history-dept" class="text-xs rounded-lg border-slate-300 p-2 border bg-white">
+              <option value="">-- ทุกแผนก --</option>
+            </select>
+            <select id="filter-history-type" class="text-xs rounded-lg border-slate-300 p-2 border bg-white">
+              <option value="">-- ทุกประเภทการลา --</option>
+              <option value="annual">ลาพักร้อน</option>
+              <option value="personal">ลากิจ</option>
+              <option value="sick">ลาป่วย</option>
+              <option value="maternity">ลาคลอด</option>
+              <option value="ordination">ลาบวช</option>
+              <option value="other">ลาอื่นๆ</option>
+            </select>
+          </div>
+
+          <div class="text-xs text-slate-500">
+            <span id="history-total-count" class="font-semibold text-slate-700">แสดงทั้งหมด 0 รายการ</span>
+          </div>
+        </div>
+
+        <!-- History Table -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-600">
+              <thead class="bg-slate-50 text-slate-700 border-b border-slate-200 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th class="py-3 px-4">รหัส / วันเวลาที่ยื่น (เวลาจริง)</th>
+                  <th class="py-3 px-4">พนักงาน</th>
+                  <th class="py-3 px-4">ประเภทลา</th>
+                  <th class="py-3 px-4">ช่วงเวลาที่ลา</th>
+                  <th class="py-3 px-4 text-center">วันทำการ</th>
+                  <th class="py-3 px-4">เหตุผลการลา</th>
+                  <th class="py-3 px-4">เอกสารแนบ</th>
+                  <th class="py-3 px-4 text-center">สถานะ</th>
+                  <th class="py-3 px-4 text-right">การจัดการ</th>
+                </tr>
+              </thead>
+              <tbody id="history-table-body" class="divide-y divide-slate-100">
+                <!-- Dynamic Content -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -976,6 +1069,101 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: EDIT LEAVE REQUEST (แก้ไขการลา) ==================== -->
+  <div id="modal-edit-leave" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+      <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+        <h4 class="font-bold text-slate-800 text-base flex items-center gap-2">
+          <i data-lucide="edit-3" class="w-5 h-5 text-blue-600"></i>
+          <span>แก้ไขข้อมูลการลา: <span id="edit-leave-modal-id" class="font-mono text-blue-700"></span></span>
+        </h4>
+        <button class="btn-close-modal text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-edit-leave" class="p-6 space-y-4 text-xs">
+        <input type="hidden" id="edit-leave-id">
+        <input type="hidden" id="edit-leave-emp-id">
+
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <span class="text-slate-500 block text-[11px]">พนักงาน:</span>
+            <span id="edit-leave-emp-name" class="font-bold text-slate-800 text-sm">-</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[11px]">แผนก:</span>
+            <span id="edit-leave-emp-dept" class="font-semibold text-slate-700">-</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">ประเภทการลา <span class="text-rose-500">*</span></label>
+            <select id="edit-leave-type" required class="w-full rounded-lg border-slate-300 p-2.5 border bg-white">
+              <option value="annual">ลาพักร้อน</option>
+              <option value="personal">ลากิจ</option>
+              <option value="sick">ลาป่วย</option>
+              <option value="maternity">ลาคลอด</option>
+              <option value="ordination">ลาบวช</option>
+              <option value="other">ลาอื่นๆ</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">ช่วงเวลาที่ลา</label>
+            <select id="edit-leave-duration-type" class="w-full rounded-lg border-slate-300 p-2.5 border bg-white">
+              <option value="full">เต็มวัน</option>
+              <option value="morning">ครึ่งวันเช้า (0.5 วัน)</option>
+              <option value="afternoon">ครึ่งวันบ่าย (0.5 วัน)</option>
+              <option value="hourly">⏱️ ลาเป็นรายชั่วโมง</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="edit-hourly-box" class="hidden bg-amber-50 p-3 rounded-xl border border-amber-200 grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-700 mb-1">จำนวนชั่วโมง</label>
+            <select id="edit-leave-hours" class="w-full rounded-lg border-slate-300 p-2 border bg-white font-bold text-amber-900">
+              <option value="1">1 ชั่วโมง (0.13 วัน)</option>
+              <option value="2">2 ชั่วโมง (0.25 วัน)</option>
+              <option value="3">3 ชั่วโมง (0.38 วัน)</option>
+              <option value="4">4 ชั่วโมง (0.50 วัน)</option>
+              <option value="5">5 ชั่วโมง (0.63 วัน)</option>
+              <option value="6">6 ชั่วโมง (0.75 วัน)</option>
+              <option value="7">7 ชั่วโมง (0.88 วัน)</option>
+              <option value="8">8 ชั่วโมง (1.00 วัน)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-700 mb-1">ระบุช่วงเวลา</label>
+            <input type="text" id="edit-leave-time-range" placeholder="เช่น 09:00 - 11:00" class="w-full rounded-lg border-slate-300 p-2 border bg-white">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">วันที่เริ่มลา <span class="text-rose-500">*</span></label>
+            <input type="date" id="edit-leave-start-date" required class="w-full rounded-lg border-slate-300 p-2.5 border bg-white font-mono">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">วันที่สิ้นสุด <span class="text-rose-500">*</span></label>
+            <input type="date" id="edit-leave-end-date" required class="w-full rounded-lg border-slate-300 p-2.5 border bg-white font-mono">
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">เหตุผลการลา <span class="text-rose-500">*</span></label>
+          <textarea id="edit-leave-reason" rows="3" required class="w-full rounded-lg border-slate-300 p-2.5 border"></textarea>
+        </div>
+
+        <div class="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" class="btn-close-modal px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">ยกเลิก</button>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold shadow">บันทึกการแก้ไข</button>
+        </div>
+      </form>
     </div>
   </div>
 

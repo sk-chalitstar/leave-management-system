@@ -31,12 +31,12 @@ class LeaveAPI {
   }
 
   /**
-   * จัดการแผนก (Departments)
+   * จัดการรายชื่อแผนก (Departments)
    */
   getDepartments() {
     try {
       const depts = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.DEPARTMENTS) || "[]");
-      return depts.length > 0 ? depts : CONFIG.DEPARTMENTS;
+      return depts && depts.length > 0 ? depts : CONFIG.DEPARTMENTS;
     } catch (e) {
       return CONFIG.DEPARTMENTS;
     }
@@ -154,12 +154,11 @@ class LeaveAPI {
     const leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
     const requestId = "LV-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + Math.floor(1000 + Math.random() * 9000);
     
-    // สำหรับ Local จำลองการเก็บไฟล์เป็น Data URL / Object
     const localRecord = {
       ...requestData,
       request_id: requestId,
-      status: "Pending",
-      approved_by: "",
+      status: "Approved", // ปรับสถานะเริ่มต้นเป็น Approved ทันที
+      approved_by: "HR Administrator",
       rejection_reason: "",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -170,50 +169,72 @@ class LeaveAPI {
 
     return {
       success: true,
-      message: "บันทึกคำขอลาเรียบร้อยแล้ว (โหมดจัดเก็บข้อมูลในระบบ)",
+      message: "บันทึกคำขอลาเรียบร้อยแล้ว",
       request_id: requestId,
       attachments: localRecord.attachments
     };
   }
 
   /**
-   * อัปเดตสถานะการลา (อนุมัติ / ไม่อนุมัติ)
+   * แก้ไขคำขอลา (Update Leave Request)
    */
-  async updateLeaveStatus(requestId, status, approver = "Administrator", rejectionReason = "") {
+  async updateLeaveRequest(leaveData) {
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
-            action: "updateLeaveStatus",
-            payload: {
-              request_id: requestId,
-              status: status,
-              approved_by: approver,
-              rejection_reason: rejectionReason
-            }
+            action: "updateLeaveRequest",
+            payload: leaveData
           })
         });
         const result = await res.json();
         if (result.success) return result;
       } catch (err) {
-        console.warn("GAS status update failed, fallback to local:", err);
+        console.warn("GAS update leave error, fallback to local:", err);
       }
     }
 
-    // Local update
     const leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
-    const index = leaves.findIndex(l => l.request_id === requestId);
+    const index = leaves.findIndex(l => l.request_id === leaveData.request_id);
     if (index !== -1) {
-      leaves[index].status = status;
-      leaves[index].approved_by = approver;
-      leaves[index].rejection_reason = rejectionReason;
-      leaves[index].updated_at = new Date().toISOString();
+      leaves[index] = {
+        ...leaves[index],
+        ...leaveData,
+        updated_at: new Date().toISOString()
+      };
       localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
-      return { success: true, message: `อัปเดตสถานะเป็น ${status} สำเร็จ` };
+      return { success: true, message: "แก้ไขข้อมูลการลาเรียบร้อยแล้ว" };
     }
-    throw new Error("ไม่พบคำขอนี้ในระบบ");
+    throw new Error("ไม่พบรายการลานี้ในระบบ");
+  }
+
+  /**
+   * ลบคำขอลา (Delete Leave Request)
+   */
+  async deleteLeaveRequest(requestId) {
+    if (this.isLive()) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "deleteLeaveRequest",
+            payload: { request_id: requestId }
+          })
+        });
+        const result = await res.json();
+        if (result.success) return result;
+      } catch (err) {
+        console.warn("GAS delete leave error, fallback to local:", err);
+      }
+    }
+
+    let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+    leaves = leaves.filter(l => l.request_id !== requestId);
+    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+    return { success: true, message: "ลบรายการลาเรียบร้อยแล้ว" };
   }
 
   /**
@@ -237,7 +258,6 @@ class LeaveAPI {
       }
     }
 
-    // Local Storage
     const employees = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
     const idx = employees.findIndex(e => String(e.emp_id).trim() === String(empData.emp_id).trim());
     if (idx !== -1) {
@@ -314,9 +334,9 @@ class LeaveAPI {
   }
 
   /**
-   * ลบวันหยุด
+   * ลบวันหยุด (รองรับการค้นหาจาก id, วันที่ หรือชื่อ)
    */
-  async deleteHoliday(holidayId) {
+  async deleteHoliday(holidayId, holidayDate = "", holidayName = "") {
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -324,7 +344,11 @@ class LeaveAPI {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "deleteHoliday",
-            payload: { id: holidayId }
+            payload: {
+              id: holidayId,
+              holiday_date: holidayDate,
+              name: holidayName
+            }
           })
         });
         const result = await res.json();
@@ -335,13 +359,78 @@ class LeaveAPI {
     }
 
     let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    holidays = holidays.filter(h => h.id !== holidayId);
+    holidays = holidays.filter(h => {
+      if (holidayId && String(h.id).trim() === String(holidayId).trim()) return false;
+      if (holidayDate && holidayName && String(h.name).trim() === String(holidayName).trim() && String(h.holiday_date).includes(holidayDate)) return false;
+      return true;
+    });
     localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
     return { success: true, message: "ลบวันหยุดเรียบร้อย" };
   }
 
   /**
-   * ซิงค์วันหยุดประจำปีจาก Default Template
+   * ล้างวันหยุดทั้งหมด
+   */
+  async clearAllHolidays() {
+    if (this.isLive()) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "clearAllHolidays"
+          })
+        });
+        const result = await res.json();
+        if (result.success) return result;
+      } catch (err) {
+        console.warn("GAS clear all holidays error:", err);
+      }
+    }
+
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify([]));
+    return { success: true, message: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว" };
+  }
+
+  /**
+   * ลบรายการวันหยุดที่ซ้ำซ้อนออก
+   */
+  async cleanDuplicateHolidays() {
+    if (this.isLive()) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "cleanDuplicateHolidays"
+          })
+        });
+        const result = await res.json();
+        if (result.success) return result;
+      } catch (err) {
+        console.warn("GAS clean duplicates error:", err);
+      }
+    }
+
+    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    const seen = new Set();
+    const unique = [];
+
+    for (let h of holidays) {
+      const cleanDate = LeaveAPI.formatDateISO(h.holiday_date);
+      const key = `${cleanDate}_${String(h.name).trim()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(h);
+      }
+    }
+
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(unique));
+    return { success: true, message: `ลบรายการซ้ำซ้อนเรียบร้อยแล้ว คงเหลือ ${unique.length} รายการ` };
+  }
+
+  /**
+   * ซิงค์ชุดวันหยุดมาตรฐานประจำปี
    */
   async syncDefaultHolidays(year) {
     const list = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(year);
@@ -363,7 +452,6 @@ class LeaveAPI {
     }
 
     let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    // ลบวันหยุดของปีนั้นออกก่อนแล้วใส่ชุดใหม่
     holidays = holidays.filter(h => Number(h.year) !== Number(year));
     holidays = holidays.concat(list);
     localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
@@ -372,25 +460,20 @@ class LeaveAPI {
 
   /**
    * Helper: คำนวณวันทำงานจริง ระหว่าง startDate ถึง endDate (ไม่นับ เสาร์-อาทิตย์ และวันหยุดนักขัตฤกษ์)
+   * รองรับ durationType: 'full', 'morning', 'afternoon', 'hourly'
    */
-  calculateWorkingDays(startDateStr, endDateStr, durationType = "full", holidayList = []) {
+  calculateWorkingDays(startDateStr, endDateStr, durationType = "full", holidayList = [], hours = 2) {
     if (!startDateStr || !endDateStr) return 0;
     
-    const start = new Date(startDateStr);
-    const end = new Date(endDateStr);
+    const cleanStart = LeaveAPI.formatDateISO(startDateStr);
+    const cleanEnd = LeaveAPI.formatDateISO(endDateStr);
+
+    const start = new Date(cleanStart);
+    const end = new Date(cleanEnd);
     if (start > end) return 0;
 
-    // รวบรวมชุดวันที่ของวันหยุดนักขัตฤกษ์เป็น Set ของ string 'YYYY-MM-DD'
     const holidaySet = new Set(
-      holidayList.map(h => {
-        let d = h.holiday_date;
-        if (d instanceof Date) {
-          d = d.toISOString().slice(0, 10);
-        } else if (typeof d === "string") {
-          d = d.slice(0, 10);
-        }
-        return d;
-      })
+      holidayList.map(h => LeaveAPI.formatDateISO(h.holiday_date))
     );
 
     let workingDays = 0;
@@ -398,9 +481,8 @@ class LeaveAPI {
 
     while (curr <= end) {
       const dayOfWeek = curr.getDay(); // 0 = อาทิตย์, 6 = เสาร์
-      const dateStr = curr.toISOString().slice(0, 10);
+      const dateStr = LeaveAPI.formatDateISO(curr);
 
-      // ถ้าไม่ใช่วันเสาร์-อาทิตย์ และไม่ใช่วันหยุดนักขัตฤกษ์
       if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidaySet.has(dateStr)) {
         workingDays += 1;
       }
@@ -408,7 +490,14 @@ class LeaveAPI {
       curr.setDate(curr.getDate() + 1);
     }
 
-    // กรณีเลือกครึ่งวัน (เช้าหรือบ่าย) ใน 1 วันทำงาน
+    // กรณีเลือกรายชั่วโมง (1 วันทำงาน = 8 ชั่วโมง)
+    if (durationType === "hourly") {
+      if (workingDays === 0) return 0;
+      const h = Number(hours) || 1;
+      return Math.round((h / 8) * 100) / 100; // เช่น 2 ชม. = 0.25 วัน
+    }
+
+    // กรณีเลือกครึ่งวัน
     if (durationType === "morning" || durationType === "afternoon") {
       return workingDays > 0 ? 0.5 : 0;
     }
@@ -422,7 +511,6 @@ class LeaveAPI {
   calculateEmployeeBalances(employee, allLeaveRequests, currentYear = new Date().getFullYear()) {
     if (!employee) return null;
 
-    // สิทธิ์เต็ม
     const quotas = {
       annual: Number(employee.annual_leave_quota || 0),
       personal: Number(employee.personal_leave_quota || 0),
@@ -430,7 +518,6 @@ class LeaveAPI {
       other: Number(employee.other_leave_quota || 0)
     };
 
-    // นับจำนวนวันลาที่ถูกใช้ไปในปีปัจจุบัน (Approved หรือ Pending)
     const used = {
       annual: 0,
       personal: 0,
@@ -442,7 +529,6 @@ class LeaveAPI {
       if (String(l.emp_id).trim() !== String(employee.emp_id).trim()) return false;
       if (l.status === "Rejected" || l.status === "Cancelled") return false;
       
-      // กรองเฉพาะปีที่ระบุ
       const leaveYear = new Date(l.start_date).getFullYear();
       return leaveYear === currentYear;
     });
@@ -453,7 +539,7 @@ class LeaveAPI {
       if (type === "annual") used.annual += days;
       else if (type === "personal") used.personal += days;
       else if (type === "sick") used.sick += days;
-      else used.other += days; // maternity, ordination, other
+      else used.other += days;
     }
 
     return {
@@ -465,24 +551,93 @@ class LeaveAPI {
       annual: {
         quota: quotas.annual,
         used: used.annual,
-        remaining: Math.max(0, quotas.annual - used.annual)
+        remaining: Math.max(0, Math.round((quotas.annual - used.annual) * 100) / 100)
       },
       personal: {
         quota: quotas.personal,
         used: used.personal,
-        remaining: Math.max(0, quotas.personal - used.personal)
+        remaining: Math.max(0, Math.round((quotas.personal - used.personal) * 100) / 100)
       },
       sick: {
         quota: quotas.sick,
         used: used.sick,
-        remaining: Math.max(0, quotas.sick - used.sick)
+        remaining: Math.max(0, Math.round((quotas.sick - used.sick) * 100) / 100)
       },
       other: {
         quota: quotas.other,
         used: used.other,
-        remaining: Math.max(0, quotas.other - used.other)
+        remaining: Math.max(0, Math.round((quotas.other - used.other) * 100) / 100)
       }
     };
+  }
+
+  /**
+   * แปลงวันที่เป็น YYYY-MM-DD ที่สะอาด
+   */
+  static formatDateISO(dateInput) {
+    if (!dateInput) return "";
+    if (typeof dateInput === "string") {
+      if (dateInput.includes("T")) {
+        const d = new Date(dateInput);
+        if (!isNaN(d.getTime())) {
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          return `${year}-${month}-${day}`;
+        }
+      }
+      return dateInput.slice(0, 10);
+    }
+    if (dateInput instanceof Date) {
+      const year = dateInput.getFullYear();
+      const month = String(dateInput.getMonth() + 1).padStart(2, "0");
+      const day = String(dateInput.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+    return String(dateInput);
+  }
+
+  /**
+   * แปลงวันที่เป็นรูปแบบ วัน/เดือน/ปี (DD/MM/YYYY)
+   */
+  static formatDateDMY(dateInput, thaiBuddhistYear = false) {
+    if (!dateInput) return "-";
+    const iso = LeaveAPI.formatDateISO(dateInput);
+    if (!iso || !iso.includes("-")) return String(dateInput);
+
+    const parts = iso.split("-");
+    if (parts.length < 3) return iso;
+
+    let year = Number(parts[0]);
+    const month = parts[1];
+    const day = parts[2];
+
+    if (thaiBuddhistYear) {
+      year += 543;
+    }
+
+    return `${day}/${month}/${year}`;
+  }
+
+  /**
+   * แปลงวันที่และเวลาเป็น วัน/เดือน/ปี และเวลาจริง (เช่น 11/11/2026 14:15 น.)
+   */
+  static formatDateTime(dateInput) {
+    if (!dateInput) return "-";
+    try {
+      const d = new Date(dateInput);
+      if (isNaN(d.getTime())) return String(dateInput);
+      
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const year = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      
+      return `${day}/${month}/${year} ${hh}:${mm} น.`;
+    } catch (e) {
+      return String(dateInput);
+    }
   }
 
   /**
