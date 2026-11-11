@@ -1182,16 +1182,139 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /**
    * 6. Reports & Export
+   * แสดงรายงานประวัติการลา พร้อมแสดงการ์ดสรุปยอดวันลาแยกประเภท (เช่น 3/10 วัน) เมื่อเลือกพนักงาน
    */
   function renderReports() {
     const tbody = document.getElementById("report-table-body");
     const summaryText = document.getElementById("report-summary-text");
     const periodText = document.getElementById("report-header-period");
+    const empSummaryCard = document.getElementById("report-employee-summary-card");
 
     const startDate = document.getElementById("report-filter-start")?.value || "";
     const endDate = document.getElementById("report-filter-end")?.value || "";
     const empId = document.getElementById("report-filter-emp")?.value || "";
     const leaveType = document.getElementById("report-filter-type")?.value || "";
+
+    // 1. ตรวจสอบการเลือกพนักงาน เพื่อแสดงการ์ดสรุปยอดวันลาแยกแต่ละประเภท (เช่น ลาพักร้อน 3/10 วัน)
+    const selectedEmp = empId ? state.employees.find(e => String(e.emp_id).trim() === String(empId).trim()) : null;
+
+    if (selectedEmp && empSummaryCard) {
+      const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests);
+      const totalUsed = (balances.annual.used + balances.personal.used + balances.sick.used + balances.other.used);
+      const totalQuota = (balances.annual.quota + balances.personal.quota + balances.sick.quota + balances.other.quota);
+      const totalRemaining = (balances.annual.remaining + balances.personal.remaining + balances.sick.remaining + balances.other.remaining);
+
+      const annualPct = Math.min(100, Math.round((balances.annual.used / (balances.annual.quota || 1)) * 100));
+      const personalPct = Math.min(100, Math.round((balances.personal.used / (balances.personal.quota || 1)) * 100));
+      const sickPct = Math.min(100, Math.round((balances.sick.used / (balances.sick.quota || 1)) * 100));
+      const otherPct = Math.min(100, Math.round((balances.other.used / (balances.other.quota || 1)) * 100));
+
+      empSummaryCard.classList.remove("hidden");
+      empSummaryCard.innerHTML = `
+        <div class="bg-gradient-to-r from-slate-50 via-blue-50/30 to-indigo-50/20 border border-slate-200 rounded-xl p-4 my-3 text-slate-800 shadow-xs">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+            <div class="flex items-center gap-3">
+              <div class="w-11 h-11 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
+                ${escapeHtml(selectedEmp.name.charAt(0))}
+              </div>
+              <div>
+                <h3 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                  <span>${escapeHtml(selectedEmp.name)}</span>
+                  <span class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800">${escapeHtml(selectedEmp.emp_id)}</span>
+                </h3>
+                <p class="text-xs text-slate-500 mt-0.5">
+                  แผนก: <span class="font-medium text-slate-700">${escapeHtml(selectedEmp.department)}</span> • 
+                  ตำแหน่ง: <span class="font-medium text-slate-700">${escapeHtml(selectedEmp.position || "-")}</span>
+                </p>
+              </div>
+            </div>
+            <div class="sm:text-right bg-white sm:bg-transparent p-2 sm:p-0 rounded-lg border sm:border-0 border-slate-200">
+              <span class="text-[11px] text-slate-500 block font-medium">ภาพรวมการใช้วันลาทั้งหมด</span>
+              <span class="text-base font-extrabold text-blue-700 font-mono">ใช้ไป ${totalUsed} / ${totalQuota} วัน</span>
+              <span class="text-[11px] text-emerald-600 font-semibold block">(สิทธิ์คงเหลือรวม ${totalRemaining} วัน)</span>
+            </div>
+          </div>
+
+          <!-- 4 Quota Badges Grid: แสดงแยกแต่ละประเภทวันหยุดและวันหยุดที่หยุดได้ เช่น 3/10 -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <!-- 1. ลาพักร้อน (Annual Leave) -->
+            <div class="bg-white p-3 rounded-xl border border-blue-100 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-semibold text-blue-700 mb-1">
+                <span>ลาพักร้อน</span>
+                <span class="font-mono bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded text-[11px] font-bold">${balances.annual.used}/${balances.annual.quota} วัน</span>
+              </div>
+              <div class="text-xl font-black text-slate-900 font-mono">
+                ${balances.annual.used} <span class="text-xs font-medium text-slate-400">/ ${balances.annual.quota} วัน</span>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
+                <div class="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style="width: ${annualPct}%"></div>
+              </div>
+              <div class="flex justify-between items-center text-[10px] mt-1.5 font-medium">
+                <span class="text-slate-400">ใช้ไป ${annualPct}%</span>
+                <span class="text-emerald-700 font-bold">คงเหลือ ${balances.annual.remaining} วัน</span>
+              </div>
+            </div>
+
+            <!-- 2. ลากิจ (Personal Leave) -->
+            <div class="bg-white p-3 rounded-xl border border-purple-100 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-semibold text-purple-700 mb-1">
+                <span>ลากิจ</span>
+                <span class="font-mono bg-purple-50 text-purple-800 px-1.5 py-0.5 rounded text-[11px] font-bold">${balances.personal.used}/${balances.personal.quota} วัน</span>
+              </div>
+              <div class="text-xl font-black text-slate-900 font-mono">
+                ${balances.personal.used} <span class="text-xs font-medium text-slate-400">/ ${balances.personal.quota} วัน</span>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
+                <div class="bg-purple-600 h-1.5 rounded-full transition-all duration-300" style="width: ${personalPct}%"></div>
+              </div>
+              <div class="flex justify-between items-center text-[10px] mt-1.5 font-medium">
+                <span class="text-slate-400">ใช้ไป ${personalPct}%</span>
+                <span class="text-emerald-700 font-bold">คงเหลือ ${balances.personal.remaining} วัน</span>
+              </div>
+            </div>
+
+            <!-- 3. ลาป่วย (Sick Leave) -->
+            <div class="bg-white p-3 rounded-xl border border-rose-100 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-semibold text-rose-700 mb-1">
+                <span>ลาป่วย</span>
+                <span class="font-mono bg-rose-50 text-rose-800 px-1.5 py-0.5 rounded text-[11px] font-bold">${balances.sick.used}/${balances.sick.quota} วัน</span>
+              </div>
+              <div class="text-xl font-black text-slate-900 font-mono">
+                ${balances.sick.used} <span class="text-xs font-medium text-slate-400">/ ${balances.sick.quota} วัน</span>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
+                <div class="bg-rose-600 h-1.5 rounded-full transition-all duration-300" style="width: ${sickPct}%"></div>
+              </div>
+              <div class="flex justify-between items-center text-[10px] mt-1.5 font-medium">
+                <span class="text-slate-400">ใช้ไป ${sickPct}%</span>
+                <span class="text-emerald-700 font-bold">คงเหลือ ${balances.sick.remaining} วัน</span>
+              </div>
+            </div>
+
+            <!-- 4. ลาอื่นๆ (Other Leave) -->
+            <div class="bg-white p-3 rounded-xl border border-amber-100 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-semibold text-amber-700 mb-1">
+                <span>ลาอื่นๆ</span>
+                <span class="font-mono bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded text-[11px] font-bold">${balances.other.used}/${balances.other.quota} วัน</span>
+              </div>
+              <div class="text-xl font-black text-slate-900 font-mono">
+                ${balances.other.used} <span class="text-xs font-medium text-slate-400">/ ${balances.other.quota} วัน</span>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
+                <div class="bg-amber-600 h-1.5 rounded-full transition-all duration-300" style="width: ${otherPct}%"></div>
+              </div>
+              <div class="flex justify-between items-center text-[10px] mt-1.5 font-medium">
+                <span class="text-slate-400">ใช้ไป ${otherPct}%</span>
+                <span class="text-emerald-700 font-bold">คงเหลือ ${balances.other.remaining} วัน</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (empSummaryCard) {
+      empSummaryCard.classList.add("hidden");
+      empSummaryCard.innerHTML = "";
+    }
 
     let filtered = [...state.leaveRequests];
 
@@ -1252,9 +1375,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const table = document.querySelector("#printable-report-section table");
     if (!table) return;
 
+    const empId = document.getElementById("report-filter-emp")?.value || "";
+    const selectedEmp = empId ? state.employees.find(e => String(e.emp_id).trim() === String(empId).trim()) : null;
+
     const wb = XLSX.utils.table_to_book(table, { sheet: "Leave_Report" });
     const today = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Leave_History_Report_${today}.xlsx`);
+    const suffix = selectedEmp ? `_${selectedEmp.emp_id}_${selectedEmp.name.replace(/\s+/g, "_")}` : "";
+    XLSX.writeFile(wb, `Leave_History_Report${suffix}_${today}.xlsx`);
   }
 
   function openPrintableLeaveSlip(req) {
@@ -1634,22 +1761,36 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Clear All Holidays
+    // Clear All Holidays (ลบข้อมูลวันหยุดนักขัตฤกษ์ทั้งหมดในหน้านี้)
     document.getElementById("btn-clear-all-holidays")?.addEventListener("click", async () => {
+      if (!state.holidays || state.holidays.length === 0) {
+        Swal.fire({ icon: "info", title: "ไม่มีข้อมูลวันหยุดในระบบ", text: "ยังไม่มีรายการวันหยุดให้ลบครับ" });
+        return;
+      }
+
       const confirm = await Swal.fire({
-        title: "ต้องการล้างวันหยุดทั้งหมด?",
-        text: "วันหยุดทั้งหมดในระบบจะถูกลบออก (คุณสามารถกดโหลดวันหยุดไทยมาตรฐานใหม่ได้ตลอดเวลา)",
+        title: "ยืนยันการลบวันหยุดทั้งหมด?",
+        html: `ต้องการลบข้อมูลวันหยุดนักขัตฤกษ์ทั้งหมดจำนวน <b>${state.holidays.length} รายการ</b> ออกจากระบบหรือไม่?<br><span class="text-xs text-slate-500">(คุณสามารถกด "โหลดวันหยุดไทยมาตรฐาน" เพื่อนำกลับมาได้ตลอดเวลา)</span>`,
         icon: "warning",
         showCancelButton: true,
         confirmButtonColor: "#e11d48",
-        confirmButtonText: "ล้างทั้งหมด",
+        cancelButtonColor: "#64748b",
+        confirmButtonText: "ใช่, ลบทั้งหมด",
         cancelButtonText: "ยกเลิก"
       });
 
       if (confirm.isConfirmed) {
+        Swal.fire({
+          title: "กำลังลบข้อมูลวันหยุด...",
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
+
         try {
+          state.holidays = [];
+          renderHolidaysTable();
           await window.leaveAPI.clearAllHolidays();
-          Swal.fire({ icon: "success", title: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
+          Swal.fire({ icon: "success", title: "ลบวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
           await loadData();
         } catch (err) {
           Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });

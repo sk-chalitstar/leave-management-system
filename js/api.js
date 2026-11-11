@@ -417,6 +417,8 @@ class LeaveAPI {
    * ล้างวันหยุดทั้งหมด
    */
   async clearAllHolidays() {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify([]));
+
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -427,13 +429,12 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        return result || { success: true, message: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว" };
       } catch (err) {
         console.warn("GAS clear all holidays error:", err);
       }
     }
 
-    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify([]));
     return { success: true, message: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว" };
   }
 

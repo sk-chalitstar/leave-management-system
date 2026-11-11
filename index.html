@@ -569,10 +569,14 @@
             <p class="text-xs text-slate-500 mt-0.5">ระบบจะไม่นำวันเหล่านี้ไปนับเป็นวันลาของพนักงาน</p>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2">
             <button id="btn-sync-thai-holidays" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors">
               <i data-lucide="download-cloud" class="w-4 h-4"></i>
               <span>โหลดวันหยุดไทยมาตรฐาน</span>
+            </button>
+            <button id="btn-clear-all-holidays" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors" title="ลบข้อมูลวันหยุดนักขัตฤกษ์ทั้งหมด">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <span>ลบทั้งหมด</span>
             </button>
             <button id="btn-open-add-holiday-modal" class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold shadow-sm flex items-center gap-2 transition-colors">
               <i data-lucide="plus" class="w-4 h-4"></i>
@@ -658,6 +662,11 @@
           <div class="text-center pb-4 border-b border-slate-200">
             <h2 class="text-xl font-bold text-slate-900">รายงานสรุปประวัติการลางานของพนักงาน</h2>
             <p id="report-header-period" class="text-xs text-slate-500 mt-1">ข้อมูล ณ วันที่พิมพ์รายงาน</p>
+          </div>
+
+          <!-- Employee Leave Quota Summary Card (แสดงแยกประเภทวันหยุดและวันหยุดที่หยุดได้ เมื่อเลือกพนักงาน) -->
+          <div id="report-employee-summary-card" class="hidden">
+            <!-- Dynamic Quota Breakdown: พักร้อน 3/10, ลากิจ, ลาป่วย, อื่นๆ -->
           </div>
 
           <!-- Report Data Table -->
