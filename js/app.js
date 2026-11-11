@@ -180,20 +180,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
 
-    // กำลังลาในวันนี้ (Approved และวันที่ตรงกับวันนี้)
+    // กำลังลาในวันนี้ (วันที่ตรงกับวันนี้)
     const todayLeaves = state.leaveRequests.filter(r => {
-      if (r.status !== "Approved") return false;
+      if (r.status === "Cancelled" || r.status === "Rejected") return false;
       const s = LeaveAPI.formatDateISO(r.start_date);
       const e = LeaveAPI.formatDateISO(r.end_date);
       return s <= todayStr && todayStr <= e;
     }).length;
 
-    // คำขอรออนุมัติ
-    const pendingLeaves = state.leaveRequests.filter(r => r.status === "Pending").length;
+    // บันทึกการลาทั้งหมด
+    const totalLeaves = state.leaveRequests.length;
 
-    // อนุมัติในเดือนนี้
-    const approvedMonth = state.leaveRequests.filter(r => {
-      if (r.status !== "Approved") return false;
+    // การลาในเดือนนี้
+    const leavesThisMonth = state.leaveRequests.filter(r => {
+      if (r.status === "Cancelled" || r.status === "Rejected") return false;
       const d = new Date(r.start_date);
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     }).length;
@@ -201,10 +201,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // พนักงานทั้งหมด
     const totalEmployees = state.employees.length;
 
-    document.getElementById("kpi-today-leaves").textContent = todayLeaves;
-    document.getElementById("kpi-pending-leaves").textContent = pendingLeaves;
-    document.getElementById("kpi-approved-month").textContent = approvedMonth;
-    document.getElementById("kpi-total-employees").textContent = totalEmployees;
+    const elToday = document.getElementById("kpi-today-leaves");
+    if (elToday) elToday.textContent = todayLeaves;
+    const elPending = document.getElementById("kpi-pending-leaves");
+    if (elPending) elPending.textContent = totalLeaves;
+    const elApproved = document.getElementById("kpi-approved-month");
+    if (elApproved) elApproved.textContent = leavesThisMonth;
+    const elEmps = document.getElementById("kpi-total-employees");
+    if (elEmps) elEmps.textContent = totalEmployees;
   }
 
   /**
@@ -1011,16 +1015,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("detail-modal-date-range").textContent = `${startDMY} ถึง ${endDMY}`;
     document.getElementById("detail-modal-reason").textContent = req.reason || "-";
 
-    const statusBox = document.getElementById("detail-modal-status-box");
-    const statusSpan = document.getElementById("detail-modal-status");
-    const approverSpan = document.getElementById("detail-modal-approver");
-    const approverLabel = document.getElementById("detail-modal-approver-label");
-
-    statusSpan.innerHTML = getStatusBadge(req.status);
-    approverLabel.textContent = "สถานะ:";
-    approverSpan.textContent = req.status;
-    statusBox.className = "p-3 rounded-xl border border-emerald-200 bg-emerald-50 flex items-center justify-between";
-
     // Attachments Preview
     const attachmentsContainer = document.getElementById("detail-modal-attachments");
     const attachments = req.attachments || [];
@@ -1466,7 +1460,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <td class="py-2.5 px-3 font-mono text-[11px]">${startDMY} ถึง ${endDMY}</td>
           <td class="py-2.5 px-3 text-center font-bold">${req.total_days}</td>
           <td class="py-2.5 px-3 text-slate-600 max-w-xs truncate">${escapeHtml(req.reason)}</td>
-          <td class="py-2.5 px-3 text-center font-semibold ${req.status === 'Approved' ? 'text-emerald-700' : (req.status === 'Rejected' ? 'text-rose-700' : 'text-amber-700')}">${req.status}</td>
+          <td class="py-2.5 px-3 text-center font-semibold text-emerald-700">บันทึกแล้ว</td>
           <td class="py-2.5 px-3 text-right no-print">
             <div class="flex items-center justify-end gap-1.5">
               <button onclick="window.viewLeaveDetail('${req.request_id}')" class="p-1 text-blue-600 hover:text-blue-800 font-semibold text-xs inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 rounded px-2 py-1 transition-colors" title="ดูใบลาและสั่งพิมพ์">
@@ -1544,15 +1538,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getStatusBadge(status) {
-    if (status === "Approved") {
-      return `<span class="badge-status badge-status-approved"><i data-lucide="check" class="w-3 h-3"></i> อนุมัติแล้ว</span>`;
-    } else if (status === "Rejected") {
-      return `<span class="badge-status badge-status-rejected"><i data-lucide="x" class="w-3 h-3"></i> ไม่อนุมัติ</span>`;
-    } else if (status === "Cancelled") {
+    if (status === "Cancelled") {
       return `<span class="badge-status badge-status-cancelled">ยกเลิกแล้ว</span>`;
-    } else {
-      return `<span class="badge-status badge-status-pending"><i data-lucide="clock" class="w-3 h-3"></i> รออนุมัติ</span>`;
     }
+    return `<span class="badge-status badge-status-approved"><i data-lucide="check" class="w-3 h-3"></i> บันทึกแล้ว</span>`;
   }
 
   function switchTab(targetTabId) {

@@ -107,8 +107,15 @@ class LeaveAPI {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success) {
-          // กรองคำขอลาที่ถูกลบไปแล้วออก ไม่ให้แคชเก่าย้อนกลับมา
-          const fetchedLeaves = (data.leaveRequests || []).filter(r => !deletedIds.includes(String(r.request_id).trim()));
+          // กรองคำขอลาที่ถูกลบไปแล้วออก ไม่ให้แคชเก่าย้อนกลับมา และแปลงสถานะเป็น Approved ทั้งหมด (ยกเลิกขั้นตอนอนุมัติ)
+          const fetchedLeaves = (data.leaveRequests || [])
+            .filter(r => !deletedIds.includes(String(r.request_id).trim()))
+            .map(r => {
+              if (!r.status || r.status === "Pending" || r.status === "pending") {
+                return { ...r, status: "Approved" };
+              }
+              return r;
+            });
           
           let cachedCustomRestDays = {};
           try {
@@ -144,7 +151,15 @@ class LeaveAPI {
 
     // Fallback หรือ โหมด Demo
     let localLeaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
-    localLeaves = localLeaves.filter(r => !deletedIds.includes(String(r.request_id).trim()));
+    localLeaves = localLeaves
+      .filter(r => !deletedIds.includes(String(r.request_id).trim()))
+      .map(r => {
+        if (!r.status || r.status === "Pending" || r.status === "pending") {
+          return { ...r, status: "Approved" };
+        }
+        return r;
+      });
+    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(localLeaves));
     const rawLocalEmps = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
     
     let cachedCustomRestDays = {};

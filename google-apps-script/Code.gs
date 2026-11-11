@@ -287,6 +287,12 @@ function getLeaveRequestsData(ss) {
     } else {
       obj.attachments = [];
     }
+
+    // แปลงสถานะในระบบเดิมที่เคยเป็น Pending ให้เป็น Approved อัตโนมัติ (ยกเลิกระบบรออนุมัติ)
+    if (!obj.status || obj.status === "Pending" || obj.status === "pending") {
+      obj.status = "Approved";
+    }
+
     list.push(obj);
   }
   return list;
@@ -406,8 +412,8 @@ function handleSubmitLeave(ss, payload) {
     Number(payload.total_days || 1),
     payload.reason || "",
     JSON.stringify(uploadedAttachments),
-    "Pending", // สถานะเริ่มต้น: Pending (รออนุมัติ)
-    "", // approved_by
+    "Approved", // บันทึกสำเร็จทันที (ยกเลิกระบบรออนุมัติ)
+    "ระบบบันทึกอัตโนมัติ", // approved_by
     "", // rejection_reason
     new Date().toISOString(),
     new Date().toISOString()

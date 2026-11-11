@@ -179,27 +179,27 @@
             </div>
           </div>
 
-          <!-- Card 2: รอการอนุมัติ -->
+          <!-- Card 2: บันทึกการลาทั้งหมด -->
           <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm hover-lift flex items-center justify-between">
             <div>
-              <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">คำขอรออนุมัติ</p>
-              <h3 id="kpi-pending-leaves" class="text-3xl font-extrabold text-amber-600 mt-1">0</h3>
-              <p class="text-xs text-amber-500 mt-1">รอหัวหน้า/HR ดำเนินการ</p>
+              <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">บันทึกการลาทั้งหมด</p>
+              <h3 id="kpi-pending-leaves" class="text-3xl font-extrabold text-blue-600 mt-1">0</h3>
+              <p class="text-xs text-slate-400 mt-1">รายการ (บันทึกเข้าระบบแล้ว)</p>
             </div>
-            <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <i data-lucide="clock" class="w-6 h-6"></i>
+            <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <i data-lucide="clipboard-list" class="w-6 h-6"></i>
             </div>
           </div>
 
-          <!-- Card 3: อนุมัติแล้วในเดือนนี้ -->
+          <!-- Card 3: การลาในเดือนนี้ -->
           <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm hover-lift flex items-center justify-between">
             <div>
-              <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">อนุมัติในเดือนนี้</p>
-              <h3 id="kpi-approved-month" class="text-3xl font-extrabold text-emerald-600 mt-1">0</h3>
-              <p class="text-xs text-emerald-500 mt-1">รายการคำขอลา</p>
+              <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">การลาในเดือนนี้</p>
+              <h3 id="kpi-approved-month" class="text-3xl font-extrabold text-indigo-600 mt-1">0</h3>
+              <p class="text-xs text-indigo-500 mt-1">รายการ (เดือนปัจจุบัน)</p>
             </div>
-            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+            <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <i data-lucide="calendar-check" class="w-6 h-6"></i>
             </div>
           </div>
 
@@ -830,24 +830,6 @@
             <!-- Dynamic Attachment Previews -->
           </div>
         </div>
-
-        <!-- Approval / Rejection Status Box -->
-        <div id="detail-modal-status-box" class="p-3 rounded-xl border flex items-center justify-between">
-          <div>
-            <span class="text-[11px] text-slate-500 block">สถานะปัจจุบัน:</span>
-            <span id="detail-modal-status" class="font-bold text-sm">-</span>
-          </div>
-          <div class="text-right">
-            <span class="text-[11px] text-slate-500 block" id="detail-modal-approver-label">ผู้อนุมัติ:</span>
-            <span id="detail-modal-approver" class="font-medium">-</span>
-          </div>
-        </div>
-
-        <!-- Rejection Reason Input (Visible when rejecting) -->
-        <div id="rejection-input-group" class="hidden space-y-1.5">
-          <label class="block text-xs font-semibold text-rose-700">เหตุผลที่ไม่อนุมัติ:</label>
-          <input type="text" id="input-rejection-reason" placeholder="ระบุเหตุผลที่ไม่อนุมัติคำขอนี้..." class="w-full text-xs rounded-lg border-rose-300 p-2 border focus:ring-rose-500">
-        </div>
       </div>
 
       <!-- Action Footer -->
@@ -857,16 +839,9 @@
           <span>พิมพ์ใบลาทางการ (Slip)</span>
         </button>
 
-        <div id="approval-actions-group" class="flex items-center gap-2">
-          <button id="btn-reject-leave" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-4 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5">
-            <i data-lucide="x-circle" class="w-4 h-4"></i>
-            <span>ไม่อนุมัติ</span>
-          </button>
-          <button id="btn-approve-leave" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5">
-            <i data-lucide="check-circle" class="w-4 h-4"></i>
-            <span>อนุมัติคำขอ</span>
-          </button>
-        </div>
+        <button type="button" class="btn-close-modal px-4 py-2 text-xs font-semibold bg-slate-800 text-white hover:bg-slate-900 rounded-lg transition-colors">
+          ปิดหน้าต่าง
+        </button>
       </div>
     </div>
   </div>
@@ -1263,8 +1238,8 @@
   </div>
 
   <!-- Scripts with Cache Buster -->
-  <script src="js/config.js?v=2.3"></script>
-  <script src="js/api.js?v=2.3"></script>
-  <script src="js/app.js?v=2.3"></script>
+  <script src="js/config.js?v=2.4"></script>
+  <script src="js/api.js?v=2.4"></script>
+  <script src="js/app.js?v=2.4"></script>
 </body>
 </html>
