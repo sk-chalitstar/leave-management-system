@@ -27,9 +27,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Initialize
   initLucide();
+  initRealTimeClock();
   initDatePickers();
   initEventHandlers();
   loadData();
+
+  /**
+   * Real-time Clock (แสดงเวลาจริงแบบวินาทีต่อวินาที)
+   */
+  function initRealTimeClock() {
+    const clockEl = document.getElementById("realtime-clock");
+    if (!clockEl) return;
+
+    function updateClock() {
+      const now = new Date();
+      const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+      const d = now.getDate();
+      const m = thaiMonths[now.getMonth()];
+      const y = now.getFullYear() + 543;
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+
+      clockEl.textContent = `${d} ${m} ${y} ${hh}:${mm}:${ss} น.`;
+    }
+
+    updateClock();
+    setInterval(updateClock, 1000);
+  }
 
   /**
    * เรนเดอร์ไอคอน Lucide
@@ -94,11 +119,9 @@ document.addEventListener("DOMContentLoaded", () => {
       renderDashboardRecentTable();
       populateEmployeeSelects();
       populateDepartmentSelects();
-      renderApprovalsTable();
       renderEmployeeCards();
       renderHolidaysTable();
       renderReports();
-      updatePendingBadge();
       initLucide();
     } catch (err) {
       console.error("Load data error:", err);
@@ -337,10 +360,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * เติมข้อมูลแผนกลง Dropdown
+   * เติมข้อมูลแผนกลง Dropdown ทุกที่ในระบบ และจัดการรายการแผนก
    */
   function populateDepartmentSelects() {
-    const deptOptions = CONFIG.DEPARTMENTS.map(d => `<option value="${d}">${d}</option>`).join("");
+    const departments = window.leaveAPI.getDepartments();
+    const deptOptions = departments.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
     
     const modalDeptSelect = document.getElementById("emp-modal-dept");
     if (modalDeptSelect) modalDeptSelect.innerHTML = deptOptions;
@@ -349,17 +373,146 @@ document.addEventListener("DOMContentLoaded", () => {
     if (filterDeptSelect) {
       filterDeptSelect.innerHTML = `<option value="">-- ทุกแผนก --</option>` + deptOptions;
     }
+
+    renderDepartmentsList();
   }
 
   /**
-   * ฟังก์ชันคำนวณวันลาจริงในแบบฟอร์ม (ตัดวันเสาร์-อาทิตย์ และวันหยุดนักขัตฤกษ์)
+   * เรนเดอร์รายการแผนกใน Modal จัดการแผนก
+   */
+  function renderDepartmentsList() {
+    const container = document.getElementById("departments-list-container");
+    if (!container) return;
+
+    const departments = window.leaveAPI.getDepartments();
+    if (departments.length === 0) {
+      container.innerHTML = `<p class="text-slate-400 py-3 text-center">ยังไม่มีข้อมูลแผนก</p>`;
+      return;
+    }
+
+    container.innerHTML = departments.map((dept, idx) => {
+      return `
+        <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs hover:bg-white transition-colors">
+          <span class="font-medium text-slate-800">${escapeHtml(dept)}</span>
+          <div class="flex items-center gap-1">
+            <button type="button" onclick="window.editDepartment('${escapeHtml(dept)}')" class="p-1 text-slate-400 hover:text-blue-600 transition-colors" title="แก้ไขชื่อแผนก">
+              <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+            </button>
+            <button type="button" onclick="window.deleteDepartment('${escapeHtml(dept)}')" class="p-1 text-slate-400 hover:text-rose-600 transition-colors" title="ลบแผนกนี้">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    initLucide();
+  }
+
+  window.addDepartment = function() {
+    const input = document.getElementById("input-new-department");
+    const name = (input?.value || "").trim();
+    if (!name) {
+      Swal.fire({ icon: "warning", title: "กรุณาระบุชื่อแผนก" });
+      return;
+    }
+
+    let depts = window.leaveAPI.getDepartments();
+    if (depts.includes(name)) {
+      Swal.fire({ icon: "warning", title: "มีแผนกนี้อยู่ในระบบแล้ว" });
+      return;
+    }
+
+    depts.push(name);
+    window.leaveAPI.saveDepartments(depts);
+    input.value = "";
+    populateDepartmentSelects();
+    Swal.fire({ toast: true, position: "top-end", icon: "success", title: "เพิ่มแผนกเรียบร้อย", showConfirmButton: false, timer: 1500 });
+  };
+
+  window.editDepartment = async function(oldName) {
+    const { value: newName } = await Swal.fire({
+      title: "แก้ไขชื่อแผนก",
+      input: "text",
+      inputValue: oldName,
+      showCancelButton: true,
+      confirmButtonText: "บันทึก",
+      cancelButtonText: "ยกเลิก",
+      inputValidator: (value) => {
+        if (!value || !value.trim()) return "กรุณากรอกชื่อแผนก";
+      }
+    });
+
+    if (newName && newName.trim() !== oldName) {
+      let depts = window.leaveAPI.getDepartments();
+      const idx = depts.indexOf(oldName);
+      if (idx !== -1) {
+        depts[idx] = newName.trim();
+        window.leaveAPI.saveDepartments(depts);
+
+        // อัปเดตแผนกของพนักงานที่เป็นชื่อเดิมด้วย
+        state.employees.forEach(emp => {
+          if (emp.department === oldName) {
+            emp.department = newName.trim();
+            window.leaveAPI.saveEmployee(emp);
+          }
+        });
+
+        populateDepartmentSelects();
+        renderEmployeeCards();
+        Swal.fire({ icon: "success", title: "แก้ไขแผนกสำเร็จ", timer: 1500, showConfirmButton: false });
+      }
+    }
+  };
+
+  window.deleteDepartment = async function(deptName) {
+    const confirm = await Swal.fire({
+      title: "ยืนยันการลบแผนก?",
+      text: `ต้องการลบแผนก "${deptName}" หรือไม่?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#e11d48",
+      confirmButtonText: "ลบ",
+      cancelButtonText: "ยกเลิก"
+    });
+
+    if (confirm.isConfirmed) {
+      let depts = window.leaveAPI.getDepartments();
+      depts = depts.filter(d => d !== deptName);
+      window.leaveAPI.saveDepartments(depts);
+      populateDepartmentSelects();
+      Swal.fire({ icon: "success", title: "ลบแผนกเรียบร้อย", timer: 1500, showConfirmButton: false });
+    }
+  };
+
+  /**
+   * ฟังก์ชันคำนวณวันลาจริงในแบบฟอร์ม (ตัดวันเสาร์-อาทิตย์, วันหยุดนักขัตฤกษ์ และรองรับรายชั่วโมง)
    */
   function calculateFormDays() {
     const startDate = document.getElementById("leave-form-start-date").value;
-    const endDate = document.getElementById("leave-form-end-date").value;
+    let endDate = document.getElementById("leave-form-end-date").value;
     const durationType = document.getElementById("leave-form-duration-type").value;
     const banner = document.getElementById("leave-calc-details");
     const totalDaysSpan = document.getElementById("calculated-total-days");
+    const hourlyBox = document.getElementById("hourly-leave-options");
+    const hourlySelect = document.getElementById("leave-form-hours-select");
+    const hourlyEquiv = document.getElementById("hourly-equiv-text");
+
+    let hours = 2;
+    if (durationType === "hourly") {
+      if (hourlyBox) hourlyBox.classList.remove("hidden");
+      hours = Number(hourlySelect?.value || 2);
+      // หากเป็นรายชั่วโมง ให้บังคับวันสิ้นสุดตรงกับวันเริ่มต้น
+      if (startDate && startDatePicker) {
+        endDate = startDate;
+        document.getElementById("leave-form-end-date").value = startDate;
+        if (endDatePicker) endDatePicker.setDate(startDate, false);
+      }
+      const equivDay = Math.round((hours / 8) * 100) / 100;
+      if (hourlyEquiv) hourlyEquiv.textContent = `${hours} ชม. = ${equivDay} วันทำการ`;
+    } else {
+      if (hourlyBox) hourlyBox.classList.add("hidden");
+    }
 
     if (!startDate || !endDate) {
       totalDaysSpan.textContent = "0";
@@ -367,13 +520,19 @@ document.addEventListener("DOMContentLoaded", () => {
       return 0;
     }
 
-    const workingDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays);
+    const workingDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays, hours);
     totalDaysSpan.textContent = workingDays;
 
     if (workingDays === 0) {
       banner.innerHTML = `<span class="text-rose-600 font-semibold">ช่วงวันที่เลือกตรงกับวันหยุดทั้งหมด (วันเสาร์-อาทิตย์ หรือวันหยุดนักขัตฤกษ์)</span>`;
     } else {
-      banner.textContent = `คำนวณวันทำงานสุทธิ (ตัดวันเสาร์-อาทิตย์ และวันหยุดนักขัตฤกษ์ออกแล้ว)`;
+      if (durationType === "hourly") {
+        const timeStart = document.getElementById("leave-form-time-start")?.value || "09:00";
+        const timeEnd = document.getElementById("leave-form-time-end")?.value || "11:00";
+        banner.innerHTML = `<span class="font-bold text-indigo-900">ลา ${hours} ชั่วโมง</span> (เวลา ${timeStart} - ${timeEnd} น. เทียบเท่า ${workingDays} วันทำการ)`;
+      } else {
+        banner.textContent = `คำนวณวันทำงานสุทธิ (ตัดวันเสาร์-อาทิตย์ และวันหยุดนักขัตฤกษ์ออกแล้ว)`;
+      }
     }
 
     // ตรวจสอบโควตาคงเหลือของพนักงาน
@@ -844,44 +1003,85 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /**
    * 5. Holidays Table
+   * แสดงวันที่ในรูปแบบ วัน/เดือน/ปี (DD/MM/YYYY) ตามมาตรฐาน และลบรายการได้ 100%
    */
   function renderHolidaysTable() {
     const tbody = document.getElementById("holidays-table-body");
     if (!tbody) return;
 
     if (state.holidays.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-400">ยังไม่มีข้อมูลวันหยุดนักขัตฤกษ์ในระบบ กรุณากดปุ่ม "โหลดวันหยุดไทยมาตรฐาน" หรือเพิ่มวันหยุดเอง</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-400">ยังไม่มีข้อมูลวันหยุดนักขัตฤกษ์ในระบบ กรุณากดปุ่ม "โหลดวันหยุดไทย" หรือ "เพิ่มวันหยุดเอง"</td></tr>`;
       return;
     }
 
-    // เรียงตามวันที่
-    const sorted = [...state.holidays].sort((a, b) => new Date(a.holiday_date) - new Date(b.holiday_date));
+    // เรียงตามวันที่ (ตัด Timestamp ก่อนนำมา sort)
+    const sorted = [...state.holidays].sort((a, b) => {
+      const dateA = LeaveAPI.formatDateISO(a.holiday_date);
+      const dateB = LeaveAPI.formatDateISO(b.holiday_date);
+      return dateA.localeCompare(dateB);
+    });
 
     tbody.innerHTML = sorted.map(h => {
-      const dateObj = new Date(h.holiday_date);
-      const thaiDate = dateObj.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+      const cleanISO = LeaveAPI.formatDateISO(h.holiday_date);
+      // รูปแบบ วัน/เดือน/ปี (DD/MM/YYYY)
+      const dmy = LeaveAPI.formatDateDMY(cleanISO);
+      
+      // แปลงเป็นชื่อเดือนไทยแบบย่อ
+      let thaiLabel = "";
+      try {
+        const dObj = new Date(cleanISO + "T00:00:00");
+        thaiLabel = dObj.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+      } catch (e) {
+        thaiLabel = dmy;
+      }
+
+      const safeId = escapeHtml(String(h.id || ""));
+      const safeDate = escapeHtml(String(cleanISO));
+      const safeName = escapeHtml(String(h.name || ""));
 
       return `
         <tr class="hover:bg-slate-50 transition-colors">
-          <td class="py-3 px-4 font-mono font-medium text-slate-800">${h.holiday_date} <span class="text-slate-400 font-sans">(${thaiDate})</span></td>
-          <td class="py-3 px-4 font-semibold text-slate-800">${escapeHtml(h.name)}</td>
-          <td class="py-3 px-4 text-center font-mono text-slate-500">${h.year || dateObj.getFullYear()}</td>
+          <td class="py-3 px-4">
+            <span class="font-mono font-bold text-slate-800 text-sm">${dmy}</span>
+            <span class="text-slate-400 text-xs block">${thaiLabel}</span>
+          </td>
+          <td class="py-3 px-4 font-semibold text-slate-800">${safeName}</td>
+          <td class="py-3 px-4 text-center font-mono text-slate-500">${h.year || cleanISO.slice(0, 4)}</td>
           <td class="py-3 px-4 text-right">
-            <button onclick="window.confirmDeleteHoliday('${h.id}')" class="text-rose-600 hover:text-rose-800 font-medium text-xs">
-              ลบออก
+            <button onclick="window.confirmDeleteHoliday('${safeId}', '${safeDate}', '${safeName}')" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ml-auto">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>ลบออก</span>
             </button>
           </td>
         </tr>
       `;
     }).join("");
+
+    initLucide();
   }
 
-  window.confirmDeleteHoliday = async function(id) {
-    try {
-      await window.leaveAPI.deleteHoliday(id);
-      loadData();
-    } catch (err) {
-      Swal.fire({ icon: "error", title: "ไม่สามารถลบได้", text: err.message });
+  /**
+   * ยืนยันการลบวันหยุด
+   */
+  window.confirmDeleteHoliday = async function(id, holidayDate, holidayName) {
+    const confirm = await Swal.fire({
+      title: "ยืนยันการลบวันหยุด?",
+      html: `ต้องการลบ <b>"${holidayName}"</b><br><span class="text-xs text-slate-500">วันที่ ${LeaveAPI.formatDateDMY(holidayDate)}</span> หรือไม่?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#e11d48",
+      confirmButtonText: "ลบวันหยุดนี้",
+      cancelButtonText: "ยกเลิก"
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        await window.leaveAPI.deleteHoliday(id, holidayDate, holidayName);
+        Swal.fire({ icon: "success", title: "ลบวันหยุดเรียบร้อย", timer: 1200, showConfirmButton: false });
+        await loadData();
+      } catch (err) {
+        Swal.fire({ icon: "error", title: "ไม่สามารถลบได้", text: err.message });
+      }
     }
   };
 
@@ -929,13 +1129,20 @@ document.addEventListener("DOMContentLoaded", () => {
           <td class="py-2.5 px-3 font-semibold">${escapeHtml(req.emp_name)}</td>
           <td class="py-2.5 px-3">${escapeHtml(req.department)}</td>
           <td class="py-2.5 px-3">${typeInfo.name.split(" ")[0]}</td>
-          <td class="py-2.5 px-3 font-mono text-[11px]">${req.start_date} ถึง ${req.end_date}</td>
+          <td class="py-2.5 px-3 font-mono text-[11px]">${LeaveAPI.formatDateDMY(req.start_date)} ถึง ${LeaveAPI.formatDateDMY(req.end_date)}</td>
           <td class="py-2.5 px-3 text-center font-bold">${req.total_days}</td>
           <td class="py-2.5 px-3 text-slate-600 max-w-xs truncate">${escapeHtml(req.reason)}</td>
           <td class="py-2.5 px-3 text-center font-semibold ${req.status === 'Approved' ? 'text-emerald-700' : (req.status === 'Rejected' ? 'text-rose-700' : 'text-amber-700')}">${req.status}</td>
+          <td class="py-2.5 px-3 text-right no-print">
+            <button onclick="window.viewLeaveDetail('${req.request_id}')" class="text-blue-600 hover:text-blue-800 font-semibold text-xs inline-flex items-center gap-1">
+              <i data-lucide="eye" class="w-3.5 h-3.5"></i> ดูใบลา
+            </button>
+          </td>
         </tr>
       `;
     }).join("");
+
+    initLucide();
   }
 
   /**
@@ -1050,11 +1257,6 @@ document.addEventListener("DOMContentLoaded", () => {
         pageTitle.textContent = "บันทึกยื่นคำขอลา";
         pageSubtitle.textContent = "ระบบคำนวณวันทำงาน หักวันหยุดนักขัตฤกษ์ และแนบเอกสารหลักฐาน";
         break;
-      case "tab-leave-approvals":
-        pageTitle.textContent = "คำขอ & อนุมัติการลา";
-        pageSubtitle.textContent = "รายการตรวจสอบและดำเนินการอนุมัติคำขอลา";
-        renderApprovalsTable();
-        break;
       case "tab-employee-balances":
         pageTitle.textContent = "สิทธิ์วันลาพนักงาน";
         pageSubtitle.textContent = "ตรวจสอบและจัดการโควตาวันลาคงเหลือของพนักงานแต่ละคน";
@@ -1121,9 +1323,83 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // Goto Approvals from Dashboard
-    document.querySelector(".btn-goto-approvals")?.addEventListener("click", () => {
-      switchTab("tab-leave-approvals");
+    // Goto Reports from Dashboard
+    document.querySelector(".btn-goto-reports")?.addEventListener("click", () => {
+      switchTab("tab-reports");
+    });
+
+    // Departments Modal Events
+    document.getElementById("btn-open-departments-modal")?.addEventListener("click", () => {
+      renderDepartmentsList();
+      document.getElementById("modal-departments")?.classList.remove("hidden");
+      initLucide();
+    });
+
+    document.getElementById("btn-add-department")?.addEventListener("click", () => {
+      window.addDepartment();
+    });
+
+    document.getElementById("input-new-department")?.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        window.addDepartment();
+      }
+    });
+
+    // Hourly Leave Inputs Change
+    document.getElementById("leave-form-hours-select")?.addEventListener("change", () => {
+      calculateFormDays();
+    });
+    document.getElementById("leave-form-time-start")?.addEventListener("change", () => {
+      calculateFormDays();
+    });
+    document.getElementById("leave-form-time-end")?.addEventListener("change", () => {
+      calculateFormDays();
+    });
+
+    // Clean Duplicate Holidays
+    document.getElementById("btn-clean-duplicate-holidays")?.addEventListener("click", async () => {
+      const confirm = await Swal.fire({
+        title: "ลบวันหยุดที่ซ้ำซ้อนกัน?",
+        text: "ระบบจะตรวจสอบและลบแถวที่ชื่อและวันที่ตรงกันออก ให้เหลือเพียง 1 รายการ",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonText: "ลบรายการซ้ำ",
+        cancelButtonText: "ยกเลิก"
+      });
+
+      if (confirm.isConfirmed) {
+        try {
+          const res = await window.leaveAPI.cleanDuplicateHolidays();
+          Swal.fire({ icon: "success", title: "สำเร็จ", text: res.message, timer: 1500, showConfirmButton: false });
+          await loadData();
+        } catch (err) {
+          Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        }
+      }
+    });
+
+    // Clear All Holidays
+    document.getElementById("btn-clear-all-holidays")?.addEventListener("click", async () => {
+      const confirm = await Swal.fire({
+        title: "ต้องการล้างวันหยุดทั้งหมด?",
+        text: "วันหยุดทั้งหมดในระบบจะถูกลบออก (คุณสามารถกดโหลดวันหยุดไทยมาตรฐานใหม่ได้ตลอดเวลา)",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#e11d48",
+        confirmButtonText: "ล้างทั้งหมด",
+        cancelButtonText: "ยกเลิก"
+      });
+
+      if (confirm.isConfirmed) {
+        try {
+          await window.leaveAPI.clearAllHolidays();
+          Swal.fire({ icon: "success", title: "ล้างวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
+          await loadData();
+        } catch (err) {
+          Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        }
+      }
     });
 
     // Employee Selection in Leave Form
@@ -1182,16 +1458,31 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      const durationType = document.getElementById("leave-form-duration-type").value;
+      let reasonText = document.getElementById("leave-form-reason").value.trim();
+      let hours = 0;
+      let timeRange = "";
+
+      if (durationType === "hourly") {
+        hours = Number(document.getElementById("leave-form-hours-select")?.value || 2);
+        const tStart = document.getElementById("leave-form-time-start")?.value || "";
+        const tEnd = document.getElementById("leave-form-time-end")?.value || "";
+        timeRange = `${tStart} - ${tEnd}`;
+        reasonText = `[ลา ${hours} ชม. เวลา ${timeRange}] ${reasonText}`;
+      }
+
       const payload = {
         emp_id: state.currentEmployee.emp_id,
         emp_name: state.currentEmployee.name,
         department: state.currentEmployee.department,
         leave_type: document.getElementById("leave-form-type").value,
-        leave_duration_type: document.getElementById("leave-form-duration-type").value,
+        leave_duration_type: durationType,
+        leave_hours: hours,
+        leave_time_range: timeRange,
         start_date: document.getElementById("leave-form-start-date").value,
         end_date: document.getElementById("leave-form-end-date").value,
         total_days: totalDays,
-        reason: document.getElementById("leave-form-reason").value,
+        reason: reasonText,
         attachments: state.tempAttachments
       };
 
@@ -1214,7 +1505,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderAttachmentsPreview();
         updateEmployeeLiveQuota(null);
         await loadData();
-        switchTab("tab-leave-approvals");
+        switchTab("tab-reports");
       } catch (err) {
         Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการส่งคำขอ", text: err.message });
       } finally {
@@ -1446,7 +1737,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Close Modals
     document.querySelectorAll(".btn-close-modal").forEach(btn => {
       btn.addEventListener("click", () => {
-        document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip").forEach(m => m.classList.add("hidden"));
+        document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments").forEach(m => m.classList.add("hidden"));
       });
     });
   }

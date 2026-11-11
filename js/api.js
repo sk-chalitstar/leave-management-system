@@ -25,6 +25,26 @@ class LeaveAPI {
       const defaultHols = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(currentYear);
       localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(defaultHols));
     }
+    if (!localStorage.getItem(CONFIG.STORAGE_KEYS.DEPARTMENTS)) {
+      localStorage.setItem(CONFIG.STORAGE_KEYS.DEPARTMENTS, JSON.stringify(CONFIG.DEPARTMENTS));
+    }
+  }
+
+  /**
+   * จัดการแผนก (Departments)
+   */
+  getDepartments() {
+    try {
+      const depts = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.DEPARTMENTS) || "[]");
+      return depts.length > 0 ? depts : CONFIG.DEPARTMENTS;
+    } catch (e) {
+      return CONFIG.DEPARTMENTS;
+    }
+  }
+
+  saveDepartments(deptList) {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.DEPARTMENTS, JSON.stringify(deptList));
+    return deptList;
   }
 
   setGasUrl(url) {

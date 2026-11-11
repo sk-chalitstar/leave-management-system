@@ -11,6 +11,7 @@ const CONFIG = {
     EMPLOYEES: "lms_employees",
     LEAVE_REQUESTS: "lms_leave_requests",
     HOLIDAYS: "lms_holidays",
+    DEPARTMENTS: "lms_departments",
     SETTINGS: "lms_settings"
   },
   

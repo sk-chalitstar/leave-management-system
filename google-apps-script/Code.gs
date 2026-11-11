@@ -109,6 +109,14 @@ function doPost(e) {
         result = handleDeleteHoliday(ss, postData.payload);
         break;
 
+      case "clearAllHolidays":
+        result = handleClearAllHolidays(ss);
+        break;
+
+      case "cleanDuplicateHolidays":
+        result = handleCleanDuplicateHolidays(ss);
+        break;
+
       case "syncDefaultHolidays":
         result = handleSyncDefaultHolidays(ss, postData.payload);
         break;
@@ -266,6 +274,8 @@ function getHolidaysData(ss) {
       let val = row[j];
       if (val instanceof Date) {
         val = Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      } else if (typeof val === "string" && val.indexOf("T") > -1) {
+        val = val.split("T")[0];
       }
       obj[headers[j]] = val;
     }
@@ -505,30 +515,97 @@ function handleSaveHoliday(ss, payload) {
 }
 
 /**
- * ลบวันหยุด
+ * ลบวันหยุด (รองรับการหาจาก ID หรือ วันที่ + ชื่อ)
  */
 function handleDeleteHoliday(ss, payload) {
   const sheet = ss.getSheetByName("Holidays");
   const data = sheet.getDataRange().getValues();
-  const holId = payload.id;
+  const holId = payload.id ? String(payload.id).trim() : "";
+  const targetDate = payload.holiday_date ? String(payload.holiday_date).split("T")[0].trim() : "";
+  const targetName = payload.name ? String(payload.name).trim() : "";
 
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(holId).trim()) {
+    const rowId = String(data[i][0]).trim();
+    let rowDate = data[i][1];
+    if (rowDate instanceof Date) {
+      rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } else if (typeof rowDate === "string" && rowDate.indexOf("T") > -1) {
+      rowDate = rowDate.split("T")[0];
+    }
+    rowDate = String(rowDate).trim();
+    const rowName = String(data[i][2]).trim();
+
+    if ((holId && rowId === holId) || (targetDate && targetName && rowDate === targetDate && rowName === targetName)) {
       sheet.deleteRow(i + 1);
       return { success: true, message: "ลบวันหยุดสำเร็จ" };
     }
   }
 
-  return { success: false, message: "ไม่พบวันหยุดนี้" };
+  return { success: false, message: "ไม่พบวันหยุดนี้ในระบบ" };
 }
 
 /**
- * ซิงค์ชุดวันหยุดมาตรฐานประจำปี
+ * ล้างวันหยุดทั้งหมด
+ */
+function handleClearAllHolidays(ss) {
+  const sheet = ss.getSheetByName("Holidays");
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.deleteRows(2, lastRow - 1);
+  }
+  return { success: true, message: "ล้างวันหยุดทั้งหมดเรียบร้อย" };
+}
+
+/**
+ * ลบวันหยุดที่ซ้ำซ้อนออก
+ */
+function handleCleanDuplicateHolidays(ss) {
+  const sheet = ss.getSheetByName("Holidays");
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 2) return { success: true, message: "ไม่มีรายการซ้ำซ้อน" };
+
+  const seen = {};
+  const rowsToDelete = [];
+
+  for (let i = 1; i < data.length; i++) {
+    let rowDate = data[i][1];
+    if (rowDate instanceof Date) {
+      rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } else if (typeof rowDate === "string" && rowDate.indexOf("T") > -1) {
+      rowDate = rowDate.split("T")[0];
+    }
+    const key = String(rowDate).trim() + "_" + String(data[i][2]).trim();
+
+    if (seen[key]) {
+      rowsToDelete.push(i + 1);
+    } else {
+      seen[key] = true;
+    }
+  }
+
+  // ลบจากล่างขึ้นบน
+  for (let k = rowsToDelete.length - 1; k >= 0; k--) {
+    sheet.deleteRow(rowsToDelete[k]);
+  }
+
+  return { success: true, message: `ลบรายการซ้ำซ้อนออก ${rowsToDelete.length} รายการแล้ว` };
+}
+
+/**
+ * ซิงค์ชุดวันหยุดมาตรฐานประจำปี (ลบของปีนั้นก่อนเพื่อป้องกันการซ้ำซ้อน)
  */
 function handleSyncDefaultHolidays(ss, payload) {
   const sheet = ss.getSheetByName("Holidays");
-  const year = payload.year || new Date().getFullYear();
+  const year = Number(payload.year || new Date().getFullYear());
   const holidays = payload.holidays || [];
+
+  // ลบวันหยุดของปีนั้นออกก่อน
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (Number(data[i][3]) === year) {
+      sheet.deleteRow(i + 1);
+    }
+  }
 
   for (let h of holidays) {
     sheet.appendRow([
