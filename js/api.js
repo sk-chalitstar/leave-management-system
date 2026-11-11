@@ -109,7 +109,21 @@ class LeaveAPI {
         if (data.success) {
           // กรองคำขอลาที่ถูกลบไปแล้วออก ไม่ให้แคชเก่าย้อนกลับมา
           const fetchedLeaves = (data.leaveRequests || []).filter(r => !deletedIds.includes(String(r.request_id).trim()));
-          const normalizedEmployees = (data.employees || []).map(e => this.normalizeEmployee(e));
+          
+          let cachedCustomRestDays = {};
+          try {
+            cachedCustomRestDays = JSON.parse(localStorage.getItem("CUSTOM_REST_DAYS_MAP") || "{}");
+          } catch (e) {}
+
+          const normalizedEmployees = (data.employees || []).map(e => {
+            const norm = this.normalizeEmployee(e);
+            const idKey = String(norm.emp_id).trim();
+            // หากในเครื่องเคยบันทึกเวรหยุดเฉพาะไว้ ให้ใช้ค่าที่ผู้ใช้กำหนดไว้ ไม่ให้ข้อมูลเก่าจาก Sheet มาทับ
+            if (cachedCustomRestDays[idKey] !== undefined) {
+              norm.rest_days = cachedCustomRestDays[idKey];
+            }
+            return norm;
+          });
 
           // ซิงค์แคชลง LocalStorage เพื่อให้เปิดดูแบบออฟไลน์ได้
           localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(normalizedEmployees));
@@ -132,7 +146,20 @@ class LeaveAPI {
     let localLeaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
     localLeaves = localLeaves.filter(r => !deletedIds.includes(String(r.request_id).trim()));
     const rawLocalEmps = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
-    const normalizedLocalEmps = rawLocalEmps.map(e => this.normalizeEmployee(e));
+    
+    let cachedCustomRestDays = {};
+    try {
+      cachedCustomRestDays = JSON.parse(localStorage.getItem("CUSTOM_REST_DAYS_MAP") || "{}");
+    } catch (e) {}
+
+    const normalizedLocalEmps = rawLocalEmps.map(e => {
+      const norm = this.normalizeEmployee(e);
+      const idKey = String(norm.emp_id).trim();
+      if (cachedCustomRestDays[idKey] !== undefined) {
+        norm.rest_days = cachedCustomRestDays[idKey];
+      }
+      return norm;
+    });
 
     return {
       employees: normalizedLocalEmps,
@@ -144,7 +171,14 @@ class LeaveAPI {
 
   normalizeEmployee(emp) {
     if (!emp) return emp;
-    let restDays = [0, 6];
+    const empId = String(emp.emp_id || "").trim();
+
+    let cachedCustomRestDays = {};
+    try {
+      cachedCustomRestDays = JSON.parse(localStorage.getItem("CUSTOM_REST_DAYS_MAP") || "{}");
+    } catch (e) {}
+
+    let restDays = null;
     if (Array.isArray(emp.rest_days)) {
       restDays = emp.rest_days.map(Number);
     } else if (emp.rest_days === "none" || emp.rest_days === "[]" || emp.rest_days === "-") {
@@ -152,6 +186,19 @@ class LeaveAPI {
     } else if (emp.rest_days !== undefined && emp.rest_days !== null && String(emp.rest_days).trim() !== "") {
       restDays = String(emp.rest_days).split(",").map(s => Number(s.trim())).filter(n => !isNaN(n));
     }
+
+    // หากในเครื่องมีการบันทึกเวรหยุดเฉพาะไว้สำหรับพนักงานรหัสนี้ ให้ใช้ค่านั้นเป็นหลัก
+    if (empId && cachedCustomRestDays[empId] !== undefined) {
+      // ถ้าข้อมูลที่ส่งเข้ามาไม่มี rest_days หรือได้ค่าเริ่มต้น [0,6] แต่ใน cache มีค่าเฉพาะ ให้ใช้จาก cache
+      if (restDays === null || (restDays.length === 2 && restDays.includes(0) && restDays.includes(6))) {
+        restDays = cachedCustomRestDays[empId];
+      }
+    }
+
+    if (restDays === null) {
+      restDays = [0, 6];
+    }
+
     return {
       ...emp,
       rest_days: restDays
@@ -306,7 +353,31 @@ class LeaveAPI {
    */
   async saveEmployee(empData) {
     const normalizedData = this.normalizeEmployee(empData);
+    const empId = String(normalizedData.emp_id).trim();
 
+    // 1. บันทึกเวรหยุดลงใน Persistent Cache ทันที เพื่อป้องกันข้อมูลหายเมื่อดึงจาก Sheet ที่ยังไม่อัปเดต
+    try {
+      const cached = JSON.parse(localStorage.getItem("CUSTOM_REST_DAYS_MAP") || "{}");
+      cached[empId] = normalizedData.rest_days;
+      localStorage.setItem("CUSTOM_REST_DAYS_MAP", JSON.stringify(cached));
+    } catch (e) {
+      console.warn("Save rest days cache error:", e);
+    }
+
+    // 2. อัปเดตลงใน LocalStorage ทันที (Local Cache)
+    const employees = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
+    const idx = employees.findIndex(e => String(e.emp_id).trim() === empId);
+    if (idx !== -1) {
+      employees[idx] = { ...employees[idx], ...normalizedData };
+    } else {
+      employees.push({
+        ...normalizedData,
+        created_at: new Date().toISOString()
+      });
+    }
+    localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
+
+    // 3. ส่งข้อมูลไปอัปเดตบน Google Sheet หากเชื่อมต่อ Live Mode
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -318,23 +389,12 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        return result;
       } catch (err) {
-        console.warn("GAS save employee failed, fallback to local:", err);
+        console.warn("GAS save employee failed, saved locally:", err);
       }
     }
 
-    const employees = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
-    const idx = employees.findIndex(e => String(e.emp_id).trim() === String(normalizedData.emp_id).trim());
-    if (idx !== -1) {
-      employees[idx] = { ...employees[idx], ...normalizedData };
-    } else {
-      employees.push({
-        ...normalizedData,
-        created_at: new Date().toISOString()
-      });
-    }
-    localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
     return { success: true, message: "บันทึกข้อมูลพนักงานเรียบร้อยแล้ว" };
   }
 
@@ -342,6 +402,20 @@ class LeaveAPI {
    * ลบพนักงาน
    */
   async deleteEmployee(empId) {
+    const targetEmpId = String(empId).trim();
+
+    // ล้างออกจาก Custom Rest Days Map
+    try {
+      const cached = JSON.parse(localStorage.getItem("CUSTOM_REST_DAYS_MAP") || "{}");
+      delete cached[targetEmpId];
+      localStorage.setItem("CUSTOM_REST_DAYS_MAP", JSON.stringify(cached));
+    } catch (e) {}
+
+    // ล้างออกจาก LocalStorage
+    let employees = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
+    employees = employees.filter(e => String(e.emp_id).trim() !== targetEmpId);
+    localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
+
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -349,19 +423,16 @@ class LeaveAPI {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "deleteEmployee",
-            payload: { emp_id: empId }
+            payload: { emp_id: targetEmpId }
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        return result;
       } catch (err) {
         console.warn("GAS delete employee error:", err);
       }
     }
 
-    let employees = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
-    employees = employees.filter(e => String(e.emp_id).trim() !== String(empId).trim());
-    localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
     return { success: true, message: "ลบพนักงานสำเร็จ" };
   }
 

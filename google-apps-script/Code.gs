@@ -546,9 +546,19 @@ function handleSaveEmployee(ss, payload) {
   const data = sheet.getDataRange().getValues();
   const empId = payload.emp_id;
 
-  // ตรวจสอบให้แน่ใจว่าหัวตารางคอลัมน์ 12 มีอยู่และเป็น rest_days
-  if (sheet.getLastColumn() < 12 || String(sheet.getRange(1, 12).getValue()).trim() === "") {
-    sheet.getRange(1, 12).setValue("rest_days").setFontWeight("bold").setBackground("#EEF2F6");
+  const headers = data[0] || [];
+  let restDaysCol = -1;
+  for (let c = 0; c < headers.length; c++) {
+    if (String(headers[c]).trim().toLowerCase() === "rest_days") {
+      restDaysCol = c + 1; // 1-based column index
+      break;
+    }
+  }
+
+  // ตรวจสอบให้แน่ใจว่าหัวตารางคอลัมน์ rest_days มีอยู่
+  if (restDaysCol === -1) {
+    restDaysCol = Math.max(12, sheet.getLastColumn() + 1);
+    sheet.getRange(1, restDaysCol).setValue("rest_days").setFontWeight("bold").setBackground("#EEF2F6");
   }
 
   let foundRow = -1;
@@ -584,7 +594,9 @@ function handleSaveEmployee(ss, payload) {
 
   if (foundRow > -1) {
     // แก้ไขข้อมูลแถวเดิม
-    sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+    sheet.getRange(foundRow, 1, 1, Math.min(rowValues.length, sheet.getLastColumn())).setValues([rowValues.slice(0, sheet.getLastColumn())]);
+    // รับประกันว่าคอลัมน์ rest_days จะได้รับค่าอย่างแน่นอน
+    sheet.getRange(foundRow, restDaysCol).setValue(restDaysStr);
     return { success: true, message: "แก้ไขข้อมูลพนักงานเรียบร้อยแล้ว", emp_id: empId };
   } else {
     // เพิ่มพนักงานใหม่

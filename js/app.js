@@ -119,6 +119,14 @@ document.addEventListener("DOMContentLoaded", () => {
       state.leaveRequests = data.leaveRequests || [];
       state.holidays = data.holidays || [];
 
+      // รักษา state.currentEmployee ให้ซิงค์กับข้อมูลใหม่ล่าสุด
+      if (state.currentEmployee) {
+        const found = state.employees.find(e => String(e.emp_id).trim() === String(state.currentEmployee.emp_id).trim());
+        if (found) {
+          state.currentEmployee = found;
+        }
+      }
+
       // อัปเดต UI แต่ละส่วน
       updateDashboardKPIs();
       renderDashboardCharts();
@@ -352,6 +360,8 @@ document.addEventListener("DOMContentLoaded", () => {
       leaveSelect.innerHTML = `<option value="">-- ค้นหาและเลือกพนักงาน --</option>` + empOptions;
       if (currentLeaveEmp && state.employees.some(e => e.emp_id === currentLeaveEmp)) {
         leaveSelect.value = currentLeaveEmp;
+        // อัปเดตโควตาและเวรหยุดให้สดใหม่อยู่เสมอ
+        updateEmployeeLiveQuota(currentLeaveEmp);
       }
     }
 
@@ -1947,10 +1957,29 @@ document.addEventListener("DOMContentLoaded", () => {
       };
 
       try {
+        // อัปเดต in-memory state ทันที
+        const empIdx = state.employees.findIndex(emp => String(emp.emp_id).trim() === payload.emp_id);
+        if (empIdx !== -1) {
+          state.employees[empIdx] = { ...state.employees[empIdx], ...payload };
+        } else {
+          state.employees.push(payload);
+        }
+
+        if (state.currentEmployee && String(state.currentEmployee.emp_id).trim() === payload.emp_id) {
+          state.currentEmployee = { ...state.currentEmployee, ...payload };
+          updateEmployeeLiveQuota(payload.emp_id);
+        }
+
         await window.leaveAPI.saveEmployee(payload);
         Swal.fire({ icon: "success", title: "บันทึกข้อมูลพนักงานเรียบร้อย", timer: 1500, showConfirmButton: false });
         document.getElementById("modal-employee").classList.add("hidden");
-        loadData();
+        await loadData();
+
+        // รีเฟรชข้อมูลในฟอร์มยื่นคำขอลาทันทีหากเลือกพนักงานคนนี้อยู่
+        const currentLeaveEmpSelect = document.getElementById("leave-form-emp-select");
+        if (currentLeaveEmpSelect && currentLeaveEmpSelect.value === payload.emp_id) {
+          updateEmployeeLiveQuota(payload.emp_id);
+        }
       } catch (err) {
         Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
       }
