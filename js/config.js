@@ -126,6 +126,7 @@ const CONFIG = {
         personal_leave_quota: 6,
         sick_leave_quota: 30,
         other_leave_quota: 15,
+        rest_days: [0, 6],
         created_at: "2024-01-15T08:00:00Z"
       },
       {
@@ -139,6 +140,7 @@ const CONFIG = {
         personal_leave_quota: 6,
         sick_leave_quota: 30,
         other_leave_quota: 15,
+        rest_days: [0, 6],
         created_at: "2024-02-01T08:00:00Z"
       },
       {
@@ -152,6 +154,7 @@ const CONFIG = {
         personal_leave_quota: 6,
         sick_leave_quota: 30,
         other_leave_quota: 15,
+        rest_days: [0, 6],
         created_at: "2024-03-10T08:00:00Z"
       },
       {
@@ -165,6 +168,7 @@ const CONFIG = {
         personal_leave_quota: 6,
         sick_leave_quota: 30,
         other_leave_quota: 15,
+        rest_days: [0, 6],
         created_at: "2023-11-01T08:00:00Z"
       },
       {
@@ -178,6 +182,7 @@ const CONFIG = {
         personal_leave_quota: 6,
         sick_leave_quota: 30,
         other_leave_quota: 15,
+        rest_days: [0, 6],
         created_at: "2024-04-20T08:00:00Z"
       }
     ],

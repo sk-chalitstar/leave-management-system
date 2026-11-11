@@ -520,18 +520,18 @@ document.addEventListener("DOMContentLoaded", () => {
       return 0;
     }
 
-    const workingDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays, hours);
+    const workingDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays, hours, state.currentEmployee);
     totalDaysSpan.textContent = workingDays;
 
     if (workingDays === 0) {
-      banner.innerHTML = `<span class="text-rose-600 font-semibold">ช่วงวันที่เลือกตรงกับวันหยุดทั้งหมด (วันเสาร์-อาทิตย์ หรือวันหยุดนักขัตฤกษ์)</span>`;
+      banner.innerHTML = `<span class="text-rose-600 font-semibold">ช่วงวันที่เลือกตรงกับวันหยุดทั้งหมด (เวรหยุดประจำตัว หรือวันหยุดนักขัตฤกษ์)</span>`;
     } else {
       if (durationType === "hourly") {
-        const timeStart = document.getElementById("leave-form-time-start")?.value || "09:00";
-        const timeEnd = document.getElementById("leave-form-time-end")?.value || "11:00";
+        const timeStart = document.getElementById("leave-form-time-start")?.value || "08:00";
+        const timeEnd = document.getElementById("leave-form-time-end")?.value || "12:00";
         banner.innerHTML = `<span class="font-bold text-indigo-900">ลา ${hours} ชั่วโมง</span> (เวลา ${timeStart} - ${timeEnd} น. เทียบเท่า ${workingDays} วันทำการ)`;
       } else {
-        banner.textContent = `คำนวณวันทำงานสุทธิ (ตัดวันเสาร์-อาทิตย์ และวันหยุดนักขัตฤกษ์ออกแล้ว)`;
+        banner.textContent = `คำนวณวันทำงานสุทธิ (ตัดเวรหยุดของพนักงาน และวันหยุดนักขัตฤกษ์ออกแล้ว)`;
       }
     }
 
@@ -572,11 +572,37 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * อัปเดตแสดงโควตาวันลาคงเหลือของพนักงานที่ถูกเลือกในฟอร์มยื่นคำขอ
+   * Helper: แปลงเวรหยุดประจำสัปดาห์ (Array ของตัวเลข 0-6) เป็นข้อความภาษาไทย
+   */
+  function formatRestDays(restDays) {
+    if (!restDays || !Array.isArray(restDays) || restDays.length === 0) {
+      return "ไม่มีวันหยุดประจำ (เข้ากะ/เวร)";
+    }
+    const dayNames = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์"];
+    const sorted = [...restDays].map(Number).sort((a, b) => a - b);
+    if (sorted.length === 2 && sorted.includes(0) && sorted.includes(6)) return "เสาร์ - อาทิตย์";
+    if (sorted.length === 1 && sorted.includes(0)) return "วันอาทิตย์";
+    if (sorted.length === 1 && sorted.includes(6)) return "วันเสาร์";
+    return sorted.map(d => dayNames[d]).join(", ");
+  }
+
+  /**
+   * กำหนดค่า Checkbox เวรหยุดด่วน
+   */
+  window.setRestDaysPreset = function(daysArray) {
+    const checkboxes = document.querySelectorAll('input[name="emp-rest-day"]');
+    checkboxes.forEach(cb => {
+      cb.checked = daysArray.includes(Number(cb.value));
+    });
+  };
+
+  /**
+   * อัปเดตแสดงโควตาวันลาคงเหลือและเวรหยุดของพนักงานที่ถูกเลือกในฟอร์มยื่นคำขอ
    */
   function updateEmployeeLiveQuota(empId) {
     const container = document.getElementById("emp-live-quota-container");
     const deptInput = document.getElementById("leave-form-emp-dept");
+    const restDaysText = document.getElementById("emp-rest-days-text");
 
     if (!empId) {
       state.currentEmployee = null;
@@ -596,6 +622,10 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("quota-remain-personal").textContent = balances.personal.remaining;
       document.getElementById("quota-remain-sick").textContent = balances.sick.remaining;
       document.getElementById("quota-remain-other").textContent = balances.other.remaining;
+
+      if (restDaysText) {
+        restDaysText.textContent = formatRestDays(emp.rest_days);
+      }
 
       if (container) container.classList.remove("hidden");
       calculateFormDays();
@@ -1034,6 +1064,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 <span class="text-sm font-bold text-amber-900">${balances.other.remaining}</span>
               </div>
             </div>
+
+            <!-- Rest Days Info -->
+            <div class="mt-3 flex items-center justify-between text-[11px] text-slate-500 bg-slate-50 border border-slate-200/80 rounded-lg px-2.5 py-1.5">
+              <span class="flex items-center gap-1 text-slate-600 font-medium">
+                <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-500"></i> เวรหยุดประจำสัปดาห์:
+              </span>
+              <span class="font-bold text-blue-700">${formatRestDays(emp.rest_days)}</span>
+            </div>
           </div>
 
           <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
@@ -1065,6 +1103,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("emp-modal-quota-personal").value = emp.personal_leave_quota;
     document.getElementById("emp-modal-quota-sick").value = emp.sick_leave_quota;
     document.getElementById("emp-modal-quota-other").value = emp.other_leave_quota;
+
+    // ตั้งค่า Checkbox เวรหยุดประจำสัปดาห์
+    const empRestDays = Array.isArray(emp.rest_days) ? emp.rest_days.map(Number) : [0, 6];
+    window.setRestDaysPreset(empRestDays);
 
     document.getElementById("modal-employee").classList.remove("hidden");
     initLucide();
@@ -1675,7 +1717,9 @@ document.addEventListener("DOMContentLoaded", () => {
         timeRange = document.getElementById("edit-leave-time-range").value.trim();
         totalDays = Math.round((hours / 8) * 100) / 100;
       } else {
-        totalDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays);
+        const empId = document.getElementById("edit-leave-emp-id")?.value;
+        const emp = state.employees.find(e => String(e.emp_id).trim() === String(empId).trim());
+        totalDays = window.leaveAPI.calculateWorkingDays(startDate, endDate, durationType, state.holidays, hours, emp);
       }
 
       const payload = {
@@ -1814,6 +1858,8 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("employee-modal-title").innerHTML = `<i data-lucide="user-plus" class="w-5 h-5 text-blue-600"></i> เพิ่มข้อมูลพนักงานใหม่`;
       document.getElementById("form-employee").reset();
       document.getElementById("emp-modal-id").readOnly = false;
+      // ตั้งค่าเวรหยุดเริ่มต้นเป็น เสาร์ - อาทิตย์
+      window.setRestDaysPreset([0, 6]);
       document.getElementById("modal-employee").classList.remove("hidden");
       initLucide();
     });
@@ -1821,6 +1867,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Save Employee Form
     document.getElementById("form-employee")?.addEventListener("submit", async (e) => {
       e.preventDefault();
+
+      // ดึงเวรหยุดประจำสัปดาห์ที่ผู้ใช้เลือก (0=อาทิตย์, ..., 6=เสาร์)
+      const restDays = Array.from(document.querySelectorAll('input[name="emp-rest-day"]:checked')).map(cb => Number(cb.value));
+
       const payload = {
         emp_id: document.getElementById("emp-modal-id").value.trim(),
         name: document.getElementById("emp-modal-name").value.trim(),
@@ -1831,7 +1881,8 @@ document.addEventListener("DOMContentLoaded", () => {
         annual_leave_quota: Number(document.getElementById("emp-modal-quota-annual").value || 0),
         personal_leave_quota: Number(document.getElementById("emp-modal-quota-personal").value || 0),
         sick_leave_quota: Number(document.getElementById("emp-modal-quota-sick").value || 0),
-        other_leave_quota: Number(document.getElementById("emp-modal-quota-other").value || 0)
+        other_leave_quota: Number(document.getElementById("emp-modal-quota-other").value || 0),
+        rest_days: restDays
       };
 
       try {

@@ -109,14 +109,15 @@ class LeaveAPI {
         if (data.success) {
           // กรองคำขอลาที่ถูกลบไปแล้วออก ไม่ให้แคชเก่าย้อนกลับมา
           const fetchedLeaves = (data.leaveRequests || []).filter(r => !deletedIds.includes(String(r.request_id).trim()));
+          const normalizedEmployees = (data.employees || []).map(e => this.normalizeEmployee(e));
 
           // ซิงค์แคชลง LocalStorage เพื่อให้เปิดดูแบบออฟไลน์ได้
-          if (data.employees) localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(data.employees));
+          localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(normalizedEmployees));
           localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(fetchedLeaves));
           if (data.holidays) localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(data.holidays));
 
           return {
-            employees: data.employees || [],
+            employees: normalizedEmployees,
             leaveRequests: fetchedLeaves,
             holidays: data.holidays || [],
             source: "live"
@@ -130,12 +131,28 @@ class LeaveAPI {
     // Fallback หรือ โหมด Demo
     let localLeaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
     localLeaves = localLeaves.filter(r => !deletedIds.includes(String(r.request_id).trim()));
+    const rawLocalEmps = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
+    const normalizedLocalEmps = rawLocalEmps.map(e => this.normalizeEmployee(e));
 
     return {
-      employees: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]"),
+      employees: normalizedLocalEmps,
       leaveRequests: localLeaves,
       holidays: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]"),
       source: "local"
+    };
+  }
+
+  normalizeEmployee(emp) {
+    if (!emp) return emp;
+    let restDays = [0, 6];
+    if (Array.isArray(emp.rest_days)) {
+      restDays = emp.rest_days.map(Number);
+    } else if (emp.rest_days !== undefined && emp.rest_days !== null && emp.rest_days !== "") {
+      restDays = String(emp.rest_days).split(",").map(s => Number(s.trim())).filter(n => !isNaN(n));
+    }
+    return {
+      ...emp,
+      rest_days: restDays
     };
   }
 
@@ -286,6 +303,8 @@ class LeaveAPI {
    * บันทึกหรือแก้ไขพนักงาน
    */
   async saveEmployee(empData) {
+    const normalizedData = this.normalizeEmployee(empData);
+
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -293,7 +312,7 @@ class LeaveAPI {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "saveEmployee",
-            payload: empData
+            payload: normalizedData
           })
         });
         const result = await res.json();
@@ -304,12 +323,12 @@ class LeaveAPI {
     }
 
     const employees = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
-    const idx = employees.findIndex(e => String(e.emp_id).trim() === String(empData.emp_id).trim());
+    const idx = employees.findIndex(e => String(e.emp_id).trim() === String(normalizedData.emp_id).trim());
     if (idx !== -1) {
-      employees[idx] = { ...employees[idx], ...empData };
+      employees[idx] = { ...employees[idx], ...normalizedData };
     } else {
       employees.push({
-        ...empData,
+        ...normalizedData,
         created_at: new Date().toISOString()
       });
     }
@@ -505,10 +524,11 @@ class LeaveAPI {
   }
 
   /**
-   * Helper: คำนวณวันทำงานจริง ระหว่าง startDate ถึง endDate (ไม่นับ เสาร์-อาทิตย์ และวันหยุดนักขัตฤกษ์)
+   * Helper: คำนวณวันทำงานจริง ระหว่าง startDate ถึง endDate
+   * ไม่อิงเฉพาะเสาร์-อาทิตย์ แต่อิงตาม "เวรหยุดประจำตัวของพนักงาน (rest_days)" และ "วันหยุดนักขัตฤกษ์"
    * รองรับ durationType: 'full', 'morning', 'afternoon', 'hourly'
    */
-  calculateWorkingDays(startDateStr, endDateStr, durationType = "full", holidayList = [], hours = 2) {
+  calculateWorkingDays(startDateStr, endDateStr, durationType = "full", holidayList = [], hours = 2, employee = null) {
     if (!startDateStr || !endDateStr) return 0;
     
     const cleanStart = LeaveAPI.formatDateISO(startDateStr);
@@ -522,14 +542,29 @@ class LeaveAPI {
       holidayList.map(h => LeaveAPI.formatDateISO(h.holiday_date))
     );
 
+    // ดึงเวรหยุดประจำตัวของพนักงาน (0=อาทิตย์, 1=จันทร์, ..., 6=เสาร์)
+    // หากไม่ได้ระบุเวรหยุด (พนักงานเก่า) ให้ใช้ค่าเริ่มต้น [0, 6] (เสาร์-อาทิตย์)
+    let restDays = [0, 6];
+    if (employee) {
+      if (Array.isArray(employee.rest_days)) {
+        restDays = employee.rest_days.map(Number);
+      } else if (employee.rest_days !== undefined && employee.rest_days !== null && employee.rest_days !== "") {
+        restDays = String(employee.rest_days).split(",").map(s => Number(s.trim())).filter(n => !isNaN(n));
+      }
+    }
+
     let workingDays = 0;
     let curr = new Date(start);
 
     while (curr <= end) {
-      const dayOfWeek = curr.getDay(); // 0 = อาทิตย์, 6 = เสาร์
+      const dayOfWeek = curr.getDay(); // 0 = อาทิตย์, ..., 6 = เสาร์
       const dateStr = LeaveAPI.formatDateISO(curr);
 
-      if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidaySet.has(dateStr)) {
+      // วันที่ไม่สามารถลาได้ คือ วันที่ตรงกับ "เวรหยุดของพนักงาน" หรือ "วันหยุดนักขัตฤกษ์"
+      const isRestDay = restDays.includes(dayOfWeek);
+      const isPublicHoliday = holidaySet.has(dateStr);
+
+      if (!isRestDay && !isPublicHoliday) {
         workingDays += 1;
       }
 
@@ -540,7 +575,7 @@ class LeaveAPI {
     if (durationType === "hourly") {
       if (workingDays === 0) return 0;
       const h = Number(hours) || 1;
-      return Math.round((h / 8) * 100) / 100; // เช่น 2 ชม. = 0.25 วัน
+      return Math.round((h / 8) * 100) / 100; // เช่น 2 ชม. = 0.25 วัน, 4 ชม. = 0.5 วัน
     }
 
     // กรณีเลือกครึ่งวัน

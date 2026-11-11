@@ -155,14 +155,14 @@ function initSheetsIfNeeded(ss) {
     empSheet.appendRow([
       "emp_id", "name", "email", "department", "position", 
       "phone", "annual_leave_quota", "personal_leave_quota", "sick_leave_quota", 
-      "other_leave_quota", "created_at"
+      "other_leave_quota", "created_at", "rest_days"
     ]);
-    empSheet.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#EEF2F6");
+    empSheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#EEF2F6");
 
-    // เพิ่มข้อมูลตัวอย่างเริ่มต้น
-    empSheet.appendRow(["EMP-001", "สมชาย ใจดี", "somchai@company.com", "ฝ่ายไอที", "Senior Developer", "081-234-5678", 10, 6, 30, 15, new Date().toISOString()]);
-    empSheet.appendRow(["EMP-002", "กานดา สุขสม", "kanda@company.com", "ฝ่ายบุคคล (HR)", "HR Specialist", "082-345-6789", 12, 6, 30, 15, new Date().toISOString()]);
-    empSheet.appendRow(["EMP-003", "วิชัย มั่งมี", "wichai@company.com", "ฝ่ายขายและการตลาด", "Sales Executive", "083-456-7890", 8, 6, 30, 15, new Date().toISOString()]);
+    // เพิ่มข้อมูลตัวอย่างเริ่มต้น (เวรหยุดเริ่มต้นคือ 0,6 = อาทิตย์ และ เสาร์)
+    empSheet.appendRow(["EMP-001", "สมชาย ใจดี", "somchai@company.com", "ฝ่ายไอที", "Senior Developer", "081-234-5678", 10, 6, 30, 15, new Date().toISOString(), "0,6"]);
+    empSheet.appendRow(["EMP-002", "กานดา สุขสม", "kanda@company.com", "ฝ่ายบุคคล (HR)", "HR Specialist", "082-345-6789", 12, 6, 30, 15, new Date().toISOString(), "0,6"]);
+    empSheet.appendRow(["EMP-003", "วิชัย มั่งมี", "wichai@company.com", "ฝ่ายขายและการตลาด", "Sales Executive", "083-456-7890", 8, 6, 30, 15, new Date().toISOString(), "0,6"]);
   }
 
   // 2. Sheet: LeaveRequests
@@ -223,6 +223,12 @@ function getEmployeesData(ss) {
     let obj = {};
     for (let j = 0; j < headers.length; j++) {
       obj[headers[j]] = row[j];
+    }
+    // Parse rest_days จากข้อความ "0,6" ให้กลายเป็น Array [0, 6]
+    if (obj.rest_days !== undefined && obj.rest_days !== null && String(obj.rest_days).trim() !== "") {
+      obj.rest_days = String(obj.rest_days).split(",").map(function(s) { return Number(s.trim()); }).filter(function(n) { return !isNaN(n); });
+    } else {
+      obj.rest_days = [0, 6]; // ค่าเริ่มต้น เสาร์-อาทิตย์
     }
     list.push(obj);
   }
@@ -527,6 +533,10 @@ function handleSaveEmployee(ss, payload) {
     }
   }
 
+  const restDaysStr = Array.isArray(payload.rest_days) 
+    ? payload.rest_days.join(",") 
+    : (payload.rest_days !== undefined && payload.rest_days !== null ? String(payload.rest_days) : "0,6");
+
   const rowValues = [
     payload.emp_id,
     payload.name || "",
@@ -538,7 +548,8 @@ function handleSaveEmployee(ss, payload) {
     Number(payload.personal_leave_quota || 0),
     Number(payload.sick_leave_quota || 0),
     Number(payload.other_leave_quota || 0),
-    payload.created_at || new Date().toISOString()
+    payload.created_at || new Date().toISOString(),
+    restDaysStr
   ];
 
   if (foundRow > -1) {
