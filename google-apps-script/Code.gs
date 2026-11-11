@@ -466,17 +466,45 @@ function handleUpdateLeaveRequest(ss, payload) {
 
 /**
  * ลบคำขอลา (Delete Leave Request)
+ * รองรับการลบด้วย request_id หรือค้นหาสำรองด้วย emp_id + start_date
  */
 function handleDeleteLeaveRequest(ss, payload) {
   const sheet = ss.getSheetByName("LeaveRequests");
-  const data = sheet.getDataRange().getValues();
-  const requestId = String(payload.request_id || "").trim();
+  if (!sheet) return { success: false, message: "ไม่พบ Sheet 'LeaveRequests'" };
 
-  for (let i = 1; i < data.length; i++) {
-    const rowId = String(data[i][0] || "").trim();
-    if (rowId === requestId || rowId.toLowerCase() === requestId.toLowerCase()) {
-      sheet.deleteRow(i + 1);
-      return { success: true, message: "ลบคำขอลาสำเร็จ" };
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: false, message: "ไม่มีข้อมูลใน LeaveRequests" };
+
+  const requestId = String(payload.request_id || "").trim();
+  const empId = String(payload.emp_id || "").trim();
+  const startDate = String(payload.start_date || "").trim();
+
+  // 1. ค้นหาด้วย request_id ก่อน
+  if (requestId) {
+    for (let i = 1; i < data.length; i++) {
+      const rowId = String(data[i][0] || "").trim();
+      if (rowId === requestId || rowId.toLowerCase() === requestId.toLowerCase()) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: "ลบคำขอลาสำเร็จ (แถวที่ " + (i + 1) + ")" };
+      }
+    }
+  }
+
+  // 2. ถ้าไม่พบด้วย request_id ให้ค้นหาด้วย emp_id และ start_date (กรณี fallback)
+  if (empId && startDate) {
+    for (let i = 1; i < data.length; i++) {
+      const rowEmpId = String(data[i][1] || "").trim();
+      let rowStart = data[i][5];
+      if (rowStart instanceof Date) {
+        rowStart = Utilities.formatDate(rowStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      } else if (typeof rowStart === "string") {
+        rowStart = rowStart.split("T")[0].trim();
+      }
+
+      if (rowEmpId === empId && String(rowStart).indexOf(startDate) > -1) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: "ลบคำขอลาสำเร็จ (ตรงกับพนักงาน " + empId + " วันที่ " + startDate + ")" };
+      }
     }
   }
 

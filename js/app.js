@@ -807,34 +807,81 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /**
    * ยืนยันการลบคำขอลา (Delete Leave)
+   * เมื่อลบแล้วจะลบออกจากทั้ง "ประวัติการลา" และ "รายงาน" พร้อมคืนสิทธิ์วันลาให้พนักงานทันที
    */
   window.confirmDeleteLeave = async function(requestId) {
+    const req = state.leaveRequests.find(r => String(r.request_id).trim() === String(requestId).trim());
+    const empName = req ? req.emp_name : "";
+    const totalDays = req ? req.total_days : 1;
+    const leaveTypeObj = req ? (CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other) : null;
+    const leaveTypeName = leaveTypeObj ? leaveTypeObj.name.split(" ")[0] : "วันลา";
+
     const confirm = await Swal.fire({
       title: "ยืนยันการลบรายการลา?",
-      text: `รหัสคำขอ ${requestId} จะถูกลบออกจากระบบ และคืนสิทธิ์วันลาให้พนักงาน`,
+      html: `
+        <div class="text-left bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1 my-2">
+          <p><b>รหัสคำขอ:</b> <span class="font-mono text-blue-600">${requestId}</span></p>
+          ${empName ? `<p><b>พนักงาน:</b> ${escapeHtml(empName)}</p>` : ""}
+          ${leaveTypeName ? `<p><b>ประเภทการลา:</b> ${leaveTypeName} (${totalDays} วันทำการ)</p>` : ""}
+        </div>
+        <div class="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold">
+          ✨ ระบบจะคืนสิทธิ์วันลาจำนวน <b>${totalDays} วัน</b> กลับเข้าสู่ยอดคงเหลือของพนักงานทันที
+        </div>
+      `,
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#e11d48",
-      confirmButtonText: "ใช่, ต้องการลบ",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "ใช่, ลบรายการและคืนวันลา",
       cancelButtonText: "ยกเลิก"
     });
 
     if (confirm.isConfirmed) {
       Swal.fire({
         title: "กำลังลบข้อมูล...",
-        text: "กำลังดำเนินการและคืนสิทธิ์วันลา",
+        text: "กำลังปรับปรุงรายงานและคืนสิทธิ์วันลา",
         allowOutsideClick: false,
         didOpen: () => {
           Swal.showLoading();
         }
       });
 
-      try {
-        await window.leaveAPI.deleteLeaveRequest(requestId);
-        await loadData();
-        Swal.fire({ icon: "success", title: "ลบรายการลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
-      } catch (err) {
-        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการลบ", text: err.message });
+      // 1. นำออกจาก state.leaveRequests ทันที (ทำให้หายไปจากประวัติ, รายงาน และคืนโควต้าทันที)
+      state.leaveRequests = state.leaveRequests.filter(r => String(r.request_id).trim() !== String(requestId).trim());
+
+      // 2. เรียก API เพื่อลบออกจาก Storage และส่งคำสั่งลบไปยัง Google Sheets
+      const res = await window.leaveAPI.deleteLeaveRequest(requestId, req || {});
+
+      // 3. รีเฟรชการแสดงผลทุกจุดบนหน้าจอทันที
+      updateDashboardKPIs();
+      renderDashboardRecentTable();
+      renderDashboardCharts();
+      renderLeaveHistoryTable();
+      renderReports();
+      renderEmployeeCards();
+
+      // 4. แจ้งเตือนสถานะสำเร็จ
+      if (res && res.sheetUpdated === false) {
+        Swal.fire({
+          icon: "info",
+          title: "ลบและคืนสิทธิ์วันลาเรียบร้อยแล้ว",
+          html: `
+            <p class="text-sm text-slate-700">ระบบได้ลบใบลาออกจาก<b>ประวัติการลา</b>และ<b>รายงาน</b> พร้อม<b>คืนวันลาให้พนักงาน</b>เรียบร้อยแล้วครับ</p>
+            <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 text-left">
+              <b>คำแนะนำสำหรับ Google Sheet:</b><br>
+              หากต้องการให้แถวใน Google Sheet ถูกลบถาวรด้วย อย่าลืมเข้าไปที่ Apps Script แล้วกด <b>Deploy > Manage deployments > แก้ไข (รูปดินสอ) > Version: New version > กด Deploy</b> ครับ
+            </div>
+          `,
+          confirmButtonText: "รับทราบ"
+        });
+      } else {
+        Swal.fire({
+          icon: "success",
+          title: "ลบรายการลาเรียบร้อยแล้ว",
+          text: `ลบออกจากประวัติและรายงาน พร้อมคืนสิทธิ์วันลา ${totalDays} วัน เรียบร้อยแล้ว`,
+          timer: 2000,
+          showConfirmButton: false
+        });
       }
     }
   };
@@ -1185,9 +1232,14 @@ document.addEventListener("DOMContentLoaded", () => {
           <td class="py-2.5 px-3 text-slate-600 max-w-xs truncate">${escapeHtml(req.reason)}</td>
           <td class="py-2.5 px-3 text-center font-semibold ${req.status === 'Approved' ? 'text-emerald-700' : (req.status === 'Rejected' ? 'text-rose-700' : 'text-amber-700')}">${req.status}</td>
           <td class="py-2.5 px-3 text-right no-print">
-            <button onclick="window.viewLeaveDetail('${req.request_id}')" class="text-blue-600 hover:text-blue-800 font-semibold text-xs inline-flex items-center gap-1">
-              <i data-lucide="eye" class="w-3.5 h-3.5"></i> ดูใบลา
-            </button>
+            <div class="flex items-center justify-end gap-1.5">
+              <button onclick="window.viewLeaveDetail('${req.request_id}')" class="p-1 text-blue-600 hover:text-blue-800 font-semibold text-xs inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 rounded px-2 py-1 transition-colors" title="ดูใบลาและสั่งพิมพ์">
+                <i data-lucide="eye" class="w-3.5 h-3.5"></i> ดูใบลา
+              </button>
+              <button onclick="window.confirmDeleteLeave('${req.request_id}')" class="p-1 text-rose-600 hover:text-rose-800 font-semibold text-xs inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 rounded px-2 py-1 transition-colors" title="ลบรายการลาและคืนวันลา">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> ลบออก
+              </button>
+            </div>
           </td>
         </tr>
       `;

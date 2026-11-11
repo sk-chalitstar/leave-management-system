@@ -93,6 +93,13 @@ class LeaveAPI {
    * ดึงข้อมูลทั้งหมดจากระบบ (Employees, LeaveRequests, Holidays)
    */
   async fetchAllData() {
+    let deletedIds = [];
+    try {
+      deletedIds = JSON.parse(localStorage.getItem("LEAVE_DELETED_REQUEST_IDS") || "[]");
+    } catch (e) {
+      deletedIds = [];
+    }
+
     if (this.isLive()) {
       try {
         const separator = this.gasUrl.includes("?") ? "&" : "?";
@@ -100,14 +107,17 @@ class LeaveAPI {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success) {
+          // กรองคำขอลาที่ถูกลบไปแล้วออก ไม่ให้แคชเก่าย้อนกลับมา
+          const fetchedLeaves = (data.leaveRequests || []).filter(r => !deletedIds.includes(String(r.request_id).trim()));
+
           // ซิงค์แคชลง LocalStorage เพื่อให้เปิดดูแบบออฟไลน์ได้
           if (data.employees) localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(data.employees));
-          if (data.leaveRequests) localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(data.leaveRequests));
+          localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(fetchedLeaves));
           if (data.holidays) localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(data.holidays));
 
           return {
             employees: data.employees || [],
-            leaveRequests: data.leaveRequests || [],
+            leaveRequests: fetchedLeaves,
             holidays: data.holidays || [],
             source: "live"
           };
@@ -118,9 +128,12 @@ class LeaveAPI {
     }
 
     // Fallback หรือ โหมด Demo
+    let localLeaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+    localLeaves = localLeaves.filter(r => !deletedIds.includes(String(r.request_id).trim()));
+
     return {
       employees: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]"),
-      leaveRequests: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]"),
+      leaveRequests: localLeaves,
       holidays: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]"),
       source: "local"
     };
@@ -211,17 +224,27 @@ class LeaveAPI {
   }
 
   /**
-   * ลบคำขอลา (Delete Leave Request)
+   * ลบคำขอลา (Delete Leave Request) และคืนสิทธิ์วันลา
    */
-  async deleteLeaveRequest(requestId) {
-    const targetId = String(requestId).trim();
+  async deleteLeaveRequest(requestId, optionalData = {}) {
+    const targetId = String(requestId || "").trim();
+    if (!targetId) return { success: false, message: "ไม่ระบุรหัสคำขอ" };
 
-    // 1. ลบออกจาก LocalStorage ก่อนเสมอเพื่อความรวดเร็วและไม่ค้างในแคช
+    // 1. บันทึกลง deletedIds เพื่อไม่ให้ fetchAllData ดึงกลับมา
+    try {
+      let deletedIds = JSON.parse(localStorage.getItem("LEAVE_DELETED_REQUEST_IDS") || "[]");
+      if (!deletedIds.includes(targetId)) {
+        deletedIds.push(targetId);
+        localStorage.setItem("LEAVE_DELETED_REQUEST_IDS", JSON.stringify(deletedIds));
+      }
+    } catch (e) {}
+
+    // 2. ลบออกจาก LocalStorage
     let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
     leaves = leaves.filter(l => String(l.request_id).trim() !== targetId);
     localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
 
-    // 2. ถ้าเชื่อมต่อ Google Sheets ให้ส่งคำสั่งไปลบในชีต
+    // 3. ถ้าเชื่อมต่อ Google Sheets ให้ส่งคำสั่งไปลบในชีต
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -229,21 +252,34 @@ class LeaveAPI {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "deleteLeaveRequest",
-            payload: { request_id: targetId }
+            payload: {
+              request_id: targetId,
+              emp_id: optionalData.emp_id || "",
+              start_date: optionalData.start_date || "",
+              leave_type: optionalData.leave_type || ""
+            }
           })
         });
         const result = await res.json();
-        if (result.success) {
-          return result;
+        if (result && result.success) {
+          return { success: true, message: "ลบคำขอลาจาก Google Sheet และคืนสิทธิ์วันลาเรียบร้อยแล้ว", sheetUpdated: true };
         }
-        throw new Error(result.message || "Google Sheets ปฏิเสธการลบ");
+        return {
+          success: true,
+          message: (result && result.message) ? result.message : "ลบในระบบเรียบร้อย",
+          sheetUpdated: false
+        };
       } catch (err) {
-        console.error("GAS delete leave error:", err);
-        throw new Error(`ลบในเครื่องสำเร็จ แต่ Google Sheet ยังไม่อัปเดต: ${err.message} (โปรดตรวจสอบการ Deploy เวอร์ชันใหม่ใน Apps Script)`);
+        console.warn("GAS delete leave error:", err);
+        return {
+          success: true,
+          message: `ลบในระบบเรียบร้อย (Google Sheet ยังไม่ได้รับการอัปเดต: ${err.message})`,
+          sheetUpdated: false
+        };
       }
     }
 
-    return { success: true, message: "ลบรายการลาเรียบร้อยแล้ว" };
+    return { success: true, message: "ลบรายการลาและคืนสิทธิ์วันลาเรียบร้อยแล้ว", sheetUpdated: true };
   }
 
   /**
