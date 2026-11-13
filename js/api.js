@@ -5,9 +5,76 @@
 
 class LeaveAPI {
   constructor() {
-    this.gasUrl = localStorage.getItem(CONFIG.STORAGE_KEYS.GAS_URL) || "";
-    this.mode = localStorage.getItem(CONFIG.STORAGE_KEYS.APP_MODE) || (this.gasUrl ? "live" : "demo");
+    // 1. ตรวจสอบว่ามีการส่ง URL มาผ่าน Query Parameter หรือไม่ (เช่น เปิดจากลิงก์ซิงค์มือถือ ?gasUrl=...)
+    try {
+      const urlParams = typeof window !== "undefined" && window.location ? new URLSearchParams(window.location.search) : null;
+      const queryGas = urlParams ? (urlParams.get("gasUrl") || urlParams.get("gas")) : null;
+      if (queryGas) {
+        const decoded = decodeURIComponent(queryGas).trim();
+        if (decoded.startsWith("http")) {
+          localStorage.setItem(CONFIG.STORAGE_KEYS.GAS_URL, decoded);
+          localStorage.setItem(CONFIG.STORAGE_KEYS.APP_MODE, "live");
+          // ล้าง URL ใน Address Bar ให้สะอาดโดยไม่ต้องรีโหลดหน้า
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Parse URL params error:", e);
+    }
+
+    // 2. ดึงค่าจาก LocalStorage หรือ Fallback ไปยัง CONFIG.DEFAULT_GAS_URL
+    this.gasUrl = (localStorage.getItem(CONFIG.STORAGE_KEYS.GAS_URL) || (CONFIG.DEFAULT_GAS_URL || "")).trim();
+    if (this.gasUrl) {
+      this.mode = "live";
+      localStorage.setItem(CONFIG.STORAGE_KEYS.APP_MODE, "live");
+    } else {
+      this.mode = localStorage.getItem(CONFIG.STORAGE_KEYS.APP_MODE) || "demo";
+    }
+
     this.initLocalStorage();
+  }
+
+  /**
+   * บันทึกรายการคำขอลาลง LocalStorage อย่างปลอดภัย (ป้องกันปัญหา QuotaExceededError โคต้าเต็ม)
+   */
+  safeSetLeaves(leaves) {
+    try {
+      localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+    } catch (quotaErr) {
+      console.warn("LocalStorage quota reached! Pruning heavy Base64 from older records...", quotaErr);
+      // ตัด base64 ออกจากรายการเก่า คงเหลือเฉพาะ url และ metadata
+      const pruned = (leaves || []).map((item, idx) => {
+        if (idx > 0 && Array.isArray(item.attachments)) {
+          return {
+            ...item,
+            attachments: item.attachments.map(att => {
+              const { base64, ...rest } = att;
+              return rest;
+            })
+          };
+        }
+        return item;
+      });
+      try {
+        localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(pruned));
+      } catch (e2) {
+        // หากยังเกิน ให้ตัด base64 ออกจากทุกรายการที่เก็บในแคช
+        const stripped = (leaves || []).map(item => ({
+          ...item,
+          attachments: (item.attachments || []).map(att => {
+            const { base64, ...rest } = att;
+            return rest;
+          })
+        }));
+        try {
+          localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(stripped));
+        } catch (e3) {
+          console.error("Critical localStorage quota error:", e3);
+        }
+      }
+    }
   }
 
   /**
@@ -18,7 +85,7 @@ class LeaveAPI {
       localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(CONFIG.INITIAL_DATA.employees));
     }
     if (!localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS)) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(CONFIG.INITIAL_DATA.leaveRequests));
+      this.safeSetLeaves(CONFIG.INITIAL_DATA.leaveRequests);
     }
     if (!localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS)) {
       const currentYear = new Date().getFullYear();
@@ -134,7 +201,7 @@ class LeaveAPI {
 
           // ซิงค์แคชลง LocalStorage เพื่อให้เปิดดูแบบออฟไลน์ได้
           localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(normalizedEmployees));
-          localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(fetchedLeaves));
+          this.safeSetLeaves(fetchedLeaves);
           if (data.holidays) localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(data.holidays));
 
           return {
@@ -159,7 +226,7 @@ class LeaveAPI {
         }
         return r;
       });
-    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(localLeaves));
+    this.safeSetLeaves(localLeaves);
     const rawLocalEmps = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EMPLOYEES) || "[]");
     
     let cachedCustomRestDays = {};
@@ -221,6 +288,78 @@ class LeaveAPI {
   }
 
   /**
+   * ซิงค์รายการคำขอลาที่ค้างส่ง (Unsynced / Offline Requests) ขึ้น Google Sheets
+   * ใช้เมื่อเปิดเครื่องครั้งแรก หรือเพิ่งเชื่อมต่อ URL สำเร็จ
+   */
+  async autoSyncPendingRequests() {
+    if (!this.isLive()) return { syncedCount: 0 };
+
+    let leaves = [];
+    try {
+      leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+    } catch (e) {
+      return { syncedCount: 0 };
+    }
+
+    let deletedIds = [];
+    try {
+      deletedIds = JSON.parse(localStorage.getItem("LEAVE_DELETED_REQUEST_IDS") || "[]");
+    } catch (e) {}
+
+    // ค้นหารายการที่ยังไม่ได้ซิงค์ขึ้น Cloud
+    const pendingList = leaves.filter(r => {
+      if (deletedIds.includes(String(r.request_id).trim())) return false;
+      return r.synced_to_cloud === false || r._pendingSync === true;
+    });
+
+    if (pendingList.length === 0) return { syncedCount: 0 };
+
+    let syncedCount = 0;
+    for (let req of pendingList) {
+      try {
+        const payload = {
+          emp_id: req.emp_id,
+          emp_name: req.emp_name,
+          department: req.department,
+          leave_type: req.leave_type,
+          leave_duration_type: req.leave_duration_type || "full",
+          leave_hours: req.leave_hours || 0,
+          leave_time_range: req.leave_time_range || "",
+          start_date: req.start_date,
+          end_date: req.end_date,
+          total_days: req.total_days,
+          reason: req.reason,
+          attachments: req.attachments || []
+        };
+
+        const res = await fetch(this.gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "submitLeave",
+            payload: payload
+          })
+        });
+        const result = await res.json();
+        if (result && result.success) {
+          req.synced_to_cloud = true;
+          delete req._pendingSync;
+          if (result.request_id) req.request_id = result.request_id;
+          syncedCount++;
+        }
+      } catch (err) {
+        console.warn("Auto-sync error for request:", req.request_id, err);
+      }
+    }
+
+    if (syncedCount > 0) {
+      this.safeSetLeaves(leaves);
+    }
+
+    return { syncedCount };
+  }
+
+  /**
    * ยื่นคำขอลาใหม่ (Submit Leave)
    * บันทึกคำขอลาลงทั้ง LocalStorage ทันที และซิงค์ขึ้น Google Sheets เพื่อให้ข้อมูลแสดงผลบนมือถือได้แบบ Real-time 100%
    */
@@ -234,6 +373,8 @@ class LeaveAPI {
       status: "Approved",
       approved_by: "ระบบบันทึกอัตโนมัติ",
       rejection_reason: "",
+      synced_to_cloud: false,
+      _pendingSync: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -249,7 +390,7 @@ class LeaveAPI {
     let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
     leaves = leaves.filter(l => String(l.request_id).trim() !== requestId);
     leaves.unshift(newRecord);
-    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+    this.safeSetLeaves(leaves);
 
     // 3. หากเชื่อมต่อ Google Sheets ให้ส่งข้อมูลไปบันทึกลงชีต
     if (this.isLive()) {
@@ -264,6 +405,8 @@ class LeaveAPI {
         });
         const result = await res.json();
         if (result && result.success) {
+          newRecord.synced_to_cloud = true;
+          delete newRecord._pendingSync;
           if (result.request_id) {
             newRecord.request_id = result.request_id;
           }
@@ -278,11 +421,12 @@ class LeaveAPI {
           } else {
             leaves.unshift(newRecord);
           }
-          localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+          this.safeSetLeaves(leaves);
 
           return {
             success: true,
-            message: result.message || "บันทึกคำขอลาเรียบร้อยแล้ว",
+            cloudSynced: true,
+            message: result.message || "บันทึกคำขอลาและซิงค์ข้อมูลไปยัง Google Sheets เรียบร้อยแล้ว",
             request_id: newRecord.request_id,
             record: newRecord,
             attachments: newRecord.attachments
@@ -290,12 +434,24 @@ class LeaveAPI {
         }
       } catch (err) {
         console.warn("GAS submission error, saved to local cache successfully:", err);
+        return {
+          success: true,
+          cloudSynced: false,
+          offlineWarning: true,
+          message: `บันทึกคำขอลาในเครื่องสำเร็จแล้ว แต่ไม่สามารถส่งไป Google Sheets ได้ (${err.message}) ระบบจะซิงค์ให้อัตโนมัติเมื่อออนไลน์`,
+          request_id: newRecord.request_id,
+          record: newRecord,
+          attachments: newRecord.attachments
+        };
       }
     }
 
+    // กรณีทำงานในโหมดจำลอง / ออฟไลน์ (ยังไม่ได้เชื่อมต่อ Google Sheets)
     return {
       success: true,
-      message: "บันทึกคำขอลาเรียบร้อยแล้ว",
+      cloudSynced: false,
+      isDemo: true,
+      message: "บันทึกคำขอลาในเครื่องเรียบร้อยแล้ว (โหมดออฟไลน์) ⚠️ ยังไม่ได้เชื่อมต่อ Google Sheets",
       request_id: newRecord.request_id,
       record: newRecord,
       attachments: newRecord.attachments
@@ -304,8 +460,11 @@ class LeaveAPI {
 
   /**
    * แก้ไขคำขอลา (Update Leave Request)
+   * รองรับการแก้ไขข้อมูล และอัปเดต/เพิ่ม/ลบ รูปภาพเอกสารแนบ
    */
   async updateLeaveRequest(leaveData) {
+    let updatedAttachments = leaveData.attachments;
+
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -317,22 +476,32 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        if (result && result.success) {
+          if (result.attachments) {
+            updatedAttachments = result.attachments;
+          }
+        }
       } catch (err) {
         console.warn("GAS update leave error, fallback to local:", err);
       }
     }
 
-    const leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
-    const index = leaves.findIndex(l => l.request_id === leaveData.request_id);
+    let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+    const index = leaves.findIndex(l => String(l.request_id).trim() === String(leaveData.request_id).trim());
     if (index !== -1) {
       leaves[index] = {
         ...leaves[index],
         ...leaveData,
+        attachments: updatedAttachments !== undefined ? updatedAttachments : (leaves[index].attachments || []),
         updated_at: new Date().toISOString()
       };
-      localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
-      return { success: true, message: "แก้ไขข้อมูลการลาเรียบร้อยแล้ว" };
+      this.safeSetLeaves(leaves);
+      return { 
+        success: true, 
+        message: "แก้ไขข้อมูลการลาและอัปเดตรูปภาพเรียบร้อยแล้ว", 
+        record: leaves[index],
+        attachments: leaves[index].attachments 
+      };
     }
     throw new Error("ไม่พบรายการลานี้ในระบบ");
   }
@@ -356,7 +525,7 @@ class LeaveAPI {
     // 2. ลบออกจาก LocalStorage
     let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
     leaves = leaves.filter(l => String(l.request_id).trim() !== targetId);
-    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+    this.safeSetLeaves(leaves);
 
     // 3. ถ้าเชื่อมต่อ Google Sheets ให้ส่งคำสั่งไปลบในชีต
     if (this.isLive()) {
@@ -859,6 +1028,86 @@ class LeaveAPI {
         });
       };
       reader.onerror = error => reject(error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * บีบอัดและปรับขนาดรูปภาพอัตโนมัติ (Client-Side Image Compression)
+   * แก้ปัญหาภาพถ่ายจากมือถือ (iPhone/Android) ขนาดใหญ่ 4-10MB จนเกิดปัญหา "โคต้าเต็ม" (QuotaExceededError)
+   * ลดขนาดเหลือเพียง ~100-250KB โดยยังคงความคมชัดและอ่านตัวหนังสือในใบรับรองแพทย์/ใบลาได้ชัดเจน 100%
+   */
+  static compressImageFile(file, maxWidth = 1280, maxHeight = 1280, quality = 0.72) {
+    return new Promise((resolve, reject) => {
+      // หากไม่ใช่รูปภาพ (เช่น ไฟล์ PDF) ให้อ่านเป็น Base64 ปกติ
+      if (!file.type || !file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = () => resolve({
+          name: file.name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          base64: reader.result
+        });
+        reader.onerror = err => reject(err);
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          // คำนวณขนาดใหม่เพื่อรักษาสัดส่วน Aspect Ratio เดิม
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext("2d");
+          // พื้นหลังสีขาวเผื่อภาพ PNG มีความโปร่งใส
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // แปลงเป็น JPEG ที่บีบอัดแล้ว
+          const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
+          const approxSize = Math.round((compressedBase64.length * 3) / 4);
+
+          const safeName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
+
+          resolve({
+            name: safeName,
+            type: "image/jpeg",
+            size: approxSize,
+            base64: compressedBase64
+          });
+        };
+        img.onerror = () => {
+          // หาก Image render ล้มเหลว ให้ fallback ใช้ออริจินัล
+          resolve({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            base64: e.target.result
+          });
+        };
+        img.src = e.target.result;
+      };
+      reader.onerror = err => reject(err);
       reader.readAsDataURL(file);
     });
   }

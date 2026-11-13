@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
     holidays: [],
     currentEmployee: null,
     tempAttachments: [], // รายการไฟล์แนบชั่วคราวในฟอร์มยื่นคำขอ
+    editAttachments: [], // รายการไฟล์แนบในฟอร์มแก้ไขคำขอลา
     selectedLeaveRequest: null,
     historyViewMode: localStorage.getItem("LEAVE_HISTORY_VIEW") || (window.innerWidth < 768 ? "cards" : "table"),
     reportViewMode: localStorage.getItem("LEAVE_REPORT_VIEW") || (window.innerWidth < 768 ? "cards" : "table"),
@@ -116,6 +117,25 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadData() {
     updateConnectionIndicator();
     try {
+      // ซิงค์คำขอลาที่ค้างส่ง (เช่น เพิ่งเปิดลิงก์เชื่อมต่อ URL บนมือถือ หรือบันทึกไว้ตอนออฟไลน์)
+      if (window.leaveAPI.isLive()) {
+        try {
+          const syncRes = await window.leaveAPI.autoSyncPendingRequests();
+          if (syncRes && syncRes.syncedCount > 0) {
+            Swal.fire({
+              toast: true,
+              position: "top-end",
+              icon: "success",
+              title: `ซิงค์รายการลาที่ค้างส่ง ${syncRes.syncedCount} รายการขึ้น Google Sheet แล้ว`,
+              showConfirmButton: false,
+              timer: 3000
+            });
+          }
+        } catch (e) {
+          console.warn("Auto sync pending requests error:", e);
+        }
+      }
+
       const data = await window.leaveAPI.fetchAllData();
       state.employees = data.employees || [];
       
@@ -136,7 +156,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       state.leaveRequests = mergedRequests;
-      localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(mergedRequests));
+      window.leaveAPI.safeSetLeaves(mergedRequests);
       state.holidays = data.holidays || [];
 
       // รักษา state.currentEmployee ให้ซิงค์กับข้อมูลใหม่ล่าสุด
@@ -169,26 +189,56 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * อัปเดตแถบสถานะการเชื่อมต่อ (Live vs Demo)
+   * อัปเดตแถบสถานะการเชื่อมต่อ (Live vs Demo) ทั้งบน Desktop, Mobile Header และ Leave Form
    */
   function updateConnectionIndicator() {
     const isLive = window.leaveAPI.isLive();
+    const currentGasUrl = window.leaveAPI.getGasUrl();
     const statusPill = document.getElementById("sidebar-db-status");
     const descPill = document.getElementById("sidebar-db-desc");
     const settingUrlInput = document.getElementById("setting-gas-url");
+    const mobileIndicator = document.getElementById("mobile-db-indicator");
+    const formOfflineNotice = document.getElementById("leave-form-offline-notice");
+    const mobileSyncInput = document.getElementById("setting-mobile-sync-url");
 
     if (settingUrlInput) {
-      settingUrlInput.value = window.leaveAPI.getGasUrl();
+      settingUrlInput.value = currentGasUrl;
+    }
+
+    if (mobileSyncInput) {
+      if (currentGasUrl) {
+        mobileSyncInput.value = window.location.origin + window.location.pathname + "?gasUrl=" + encodeURIComponent(currentGasUrl);
+      } else {
+        mobileSyncInput.value = "";
+      }
     }
 
     if (isLive) {
-      statusPill.className = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30";
-      statusPill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span> Google Sheet Live`;
-      descPill.textContent = "เชื่อมต่อ Google Sheet แล้ว";
+      if (statusPill) {
+        statusPill.className = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30";
+        statusPill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span> Google Sheet Live`;
+      }
+      if (descPill) descPill.textContent = "เชื่อมต่อ Google Sheet แล้ว";
+
+      if (mobileIndicator) {
+        mobileIndicator.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer";
+        mobileIndicator.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span> <span>Sheet Live</span>`;
+      }
+
+      if (formOfflineNotice) formOfflineNotice.classList.add("hidden");
     } else {
-      statusPill.className = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-      statusPill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Offline / Demo`;
-      descPill.textContent = "โหมดจำลอง (LocalStorage)";
+      if (statusPill) {
+        statusPill.className = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        statusPill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Offline / Demo`;
+      }
+      if (descPill) descPill.textContent = "โหมดจำลอง (LocalStorage)";
+
+      if (mobileIndicator) {
+        mobileIndicator.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 cursor-pointer";
+        mobileIndicator.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> <span>ออฟไลน์</span>`;
+      }
+
+      if (formOfflineNotice) formOfflineNotice.classList.remove("hidden");
     }
   }
 
@@ -728,26 +778,26 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * แนบเอกสารหลักฐาน (Multi-attachments)
+   * แนบเอกสารหลักฐาน (Multi-attachments) พร้อมบีบอัดรูปภาพอัตโนมัติป้องกันปัญหาโคต้าเต็ม
    */
   async function handleFilesUpload(files) {
     if (!files || files.length === 0) return;
 
     for (let file of Array.from(files)) {
-      if (file.size > 10 * 1024 * 1024) {
+      if (file.size > 20 * 1024 * 1024) {
         Swal.fire({
           icon: "warning",
           title: "ไฟล์มีขนาดใหญ่เกินไป",
-          text: `ไฟล์ ${file.name} มีขนาดเกิน 10MB`
+          text: `ไฟล์ ${file.name} มีขนาดเกิน 20MB`
         });
         continue;
       }
 
       try {
-        const fileObj = await LeaveAPI.fileToBase64(file);
+        const fileObj = await LeaveAPI.compressImageFile(file);
         state.tempAttachments.push(fileObj);
       } catch (err) {
-        console.error("File read error:", err);
+        console.error("File compression/read error:", err);
       }
     }
 
@@ -755,7 +805,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * เรนเดอร์รูปภาพ/ไฟล์แนบที่เลือกในฟอร์ม
+   * เรนเดอร์รูปภาพ/ไฟล์แนบที่เลือกในฟอร์มยื่นคำขอลา
    */
   function renderAttachmentsPreview() {
     const container = document.getElementById("attachment-preview-list");
@@ -773,12 +823,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return `
         <div class="relative group bg-white border border-slate-200 rounded-xl p-2.5 flex items-center gap-3 shadow-sm">
           ${isImg 
-            ? `<img src="${item.base64}" alt="${escapeHtml(item.name)}" class="w-12 h-12 rounded-lg object-cover border border-slate-100 shrink-0">`
+            ? `<img src="${item.base64}" alt="${escapeHtml(item.name)}" class="w-12 h-12 rounded-lg object-cover border border-slate-100 shrink-0 cursor-pointer" onclick="window.previewFullImage('${item.base64}')" title="คลิกเพื่อดูภาพเต็ม">`
             : `<div class="w-12 h-12 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 font-bold text-xs"><i data-lucide="file" class="w-6 h-6"></i></div>`
           }
           <div class="min-w-0 flex-1">
             <p class="text-xs font-medium text-slate-800 truncate" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</p>
-            <p class="text-[10px] text-slate-400">${sizeKb} KB</p>
+            <p class="text-[10px] text-slate-400">${sizeKb} KB (บีบอัดแล้ว)</p>
           </div>
           <button type="button" onclick="window.removeAttachment(${index})" class="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition-colors" title="ลบไฟล์นี้">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -793,6 +843,91 @@ document.addEventListener("DOMContentLoaded", () => {
   window.removeAttachment = function(index) {
     state.tempAttachments.splice(index, 1);
     renderAttachmentsPreview();
+  };
+
+  /**
+   * แนบเอกสาร/ถ่ายรูปเพิ่มเติมในหน้าต่างแก้ไขคำขอลา (Edit Modal)
+   */
+  async function handleEditFilesUpload(files) {
+    if (!files || files.length === 0) return;
+
+    for (let file of Array.from(files)) {
+      if (file.size > 20 * 1024 * 1024) {
+        Swal.fire({
+          icon: "warning",
+          title: "ไฟล์มีขนาดใหญ่เกินไป",
+          text: `ไฟล์ ${file.name} มีขนาดเกิน 20MB`
+        });
+        continue;
+      }
+
+      try {
+        const fileObj = await LeaveAPI.compressImageFile(file);
+        state.editAttachments.push(fileObj);
+      } catch (err) {
+        console.error("Edit file read error:", err);
+      }
+    }
+
+    renderEditAttachmentsPreview();
+  }
+
+  /**
+   * เรนเดอร์รูปภาพในหน้าต่างแก้ไขคำขอลา (Edit Modal)
+   */
+  function renderEditAttachmentsPreview() {
+    const container = document.getElementById("edit-attachment-preview-list");
+    if (!container) return;
+
+    if (!state.editAttachments || state.editAttachments.length === 0) {
+      container.innerHTML = `<div class="col-span-1 sm:col-span-2 text-center py-3 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">ยังไม่มีรูปภาพหรือเอกสารแนบ</div>`;
+      return;
+    }
+
+    container.innerHTML = state.editAttachments.map((item, index) => {
+      const isImg = (item.type && item.type.startsWith("image/")) || (item.url && !String(item.url).endsWith(".pdf"));
+      const displaySrc = item.base64 || item.url || "#";
+      const sizeKb = item.size ? Math.round(item.size / 1024) + " KB" : (item.url ? "Cloud File" : "");
+
+      return `
+        <div class="relative group bg-white border border-slate-200 rounded-xl p-2.5 flex items-center gap-2.5 shadow-2xs">
+          ${isImg 
+            ? `<img src="${displaySrc}" alt="${escapeHtml(item.name || 'Attachment')}" class="w-12 h-12 rounded-lg object-cover border border-slate-100 shrink-0 cursor-pointer hover:opacity-90 transition-opacity" onclick="window.previewFullImage('${displaySrc}')" title="คลิกเพื่อดูภาพเต็ม">`
+            : `<div class="w-12 h-12 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 font-bold text-xs"><i data-lucide="file" class="w-5 h-5"></i></div>`
+          }
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-semibold text-slate-800 truncate" title="${escapeHtml(item.name || 'ไฟล์แนบ')}">${escapeHtml(item.name || 'ไฟล์แนบ')}</p>
+            <p class="text-[10px] text-slate-400">${sizeKb}</p>
+            ${item.url ? `<a href="${item.url}" target="_blank" class="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5 mt-0.5">เปิดในไดรฟ์ <i data-lucide="external-link" class="w-3 h-3"></i></a>` : `<span class="text-[9px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">รูปใหม่</span>`}
+          </div>
+          <button type="button" onclick="window.removeEditAttachment(${index})" class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors" title="ลบรูปนี้">
+            <i data-lucide="trash-2" class="w-4 h-4 text-rose-500"></i>
+          </button>
+        </div>
+      `;
+    }).join("");
+
+    initLucide();
+  }
+
+  window.removeEditAttachment = function(index) {
+    if (state.editAttachments && state.editAttachments[index] !== undefined) {
+      state.editAttachments.splice(index, 1);
+      renderEditAttachmentsPreview();
+    }
+  };
+
+  window.previewFullImage = function(src) {
+    if (!src || src === "#") return;
+    Swal.fire({
+      imageUrl: src,
+      imageAlt: "รูปภาพหลักฐานการลา",
+      showConfirmButton: false,
+      showCloseButton: true,
+      customClass: {
+        popup: 'max-w-2xl p-2'
+      }
+    });
   };
 
   /**
@@ -1112,7 +1247,14 @@ document.addEventListener("DOMContentLoaded", () => {
       hourlyBox.classList.add("hidden");
     }
 
+    // โหลดรูปภาพเอกสารแนบเดิมเข้าสู่ state.editAttachments สำหรับการแก้ไข
+    state.editAttachments = Array.isArray(req.attachments) 
+      ? JSON.parse(JSON.stringify(req.attachments))
+      : [];
+    renderEditAttachmentsPreview();
+
     document.getElementById("modal-edit-leave").classList.remove("hidden");
+    initLucide();
   };
 
   /**
@@ -1932,6 +2074,9 @@ document.addEventListener("DOMContentLoaded", () => {
     initLucide();
   }
 
+  // เผยแพร่ switchTab สู่ Global Window
+  window.switchTab = switchTab;
+
   function initEventHandlers() {
     // Desktop Nav Items
     document.querySelectorAll(".nav-item").forEach(btn => {
@@ -2011,7 +2156,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (dropzone && fileInput) {
       dropzone.addEventListener("click", () => fileInput.click());
-      fileInput.addEventListener("change", (e) => handleFilesUpload(e.target.files));
+      fileInput.addEventListener("change", (e) => {
+        handleFilesUpload(e.target.files);
+        e.target.value = "";
+      });
 
       dropzone.addEventListener("dragover", (e) => {
         e.preventDefault();
@@ -2123,19 +2271,51 @@ document.addEventListener("DOMContentLoaded", () => {
         // สลับไปยังหน้าประวัติการลา
         switchTab("tab-leave-history");
 
-        await Swal.fire({
-          icon: "success",
-          title: "ยื่นใบลาสำเร็จ!",
-          html: `
-            <div class="text-left text-xs bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
-              <p><b>รหัสคำขอ:</b> <span class="font-mono text-blue-600 font-bold">${res.request_id || ""}</span></p>
-              <p><b>พนักงาน:</b> ${escapeHtml(payload.emp_name)}</p>
-              <p><b>จำนวนวันลา:</b> <span class="text-blue-700 font-bold">${payload.total_days} วันทำการ</span></p>
-            </div>
-            <p class="text-xs text-emerald-600 font-semibold mt-2">✨ ระบบบันทึกข้อมูลและตัดยอดวันลาให้อัตโนมัติแล้ว</p>
-          `,
-          confirmButtonText: "ตกลง"
-        });
+        if (res.cloudSynced) {
+          await Swal.fire({
+            icon: "success",
+            title: "ยื่นใบลาสำเร็จ!",
+            html: `
+              <div class="text-left text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                <p><b>รหัสคำขอ:</b> <span class="font-mono text-blue-600 font-bold">${res.request_id || ""}</span></p>
+                <p><b>พนักงาน:</b> ${escapeHtml(payload.emp_name)}</p>
+                <p><b>จำนวนวันลา:</b> <span class="text-blue-700 font-bold">${payload.total_days} วันทำการ</span></p>
+                <p><b>สถานะ:</b> <span class="text-emerald-600 font-bold">บันทึกสำเร็จ (ซิงค์ Google Sheets แล้ว)</span></p>
+              </div>
+              <p class="text-xs text-emerald-600 font-semibold mt-2.5 flex items-center justify-center gap-1">
+                <span>☁️ ข้อมูลซิงค์ขึ้น Google Sheets และแสดงผลในคอมพิวเตอร์เรียบร้อยแล้ว</span>
+              </p>
+            `,
+            confirmButtonText: "ตกลง"
+          });
+        } else {
+          // แจ้งเตือนชัดเจนว่าบันทึกเฉพาะในมือถือเครื่องนี้ ยังไม่ได้ส่งไป Google Sheets (คอมพิวเตอร์)
+          const alertRes = await Swal.fire({
+            icon: "warning",
+            title: "บันทึกในเครื่องแล้ว (ยังไม่ซิงค์ไปคอม)",
+            html: `
+              <div class="text-left text-xs bg-amber-50 p-3.5 rounded-xl border border-amber-200 space-y-1.5 text-amber-900">
+                <p><b>รหัสคำขอ:</b> <span class="font-mono font-bold">${res.request_id || ""}</span></p>
+                <p><b>พนักงาน:</b> ${escapeHtml(payload.emp_name)}</p>
+                <p><b>จำนวนวันลา:</b> <b class="text-blue-700">${payload.total_days} วันทำการ</b></p>
+                <div class="mt-2.5 pt-2 border-t border-amber-200 text-[11px] leading-relaxed">
+                  ⚠️ <b>สาเหตุที่ในคอมยังไม่ขึ้น:</b><br>
+                  เครื่องนี้กำลังทำงานใน <b>โหมดออฟไลน์ / จำลอง</b> (ยังไม่ได้ตั้งค่า Google Sheets บนมือถือนี้) ข้อมูลจึงถูกบันทึกไว้ในมือถือเท่านั้น<br><br>
+                  👉 <b>วิธีแก้:</b> ไปที่เมนู <b>"เชื่อมต่อ Google Sheets"</b> เพื่อใส่ URL เดียวกับในคอมพิวเตอร์ แล้วข้อมูลจะซิงค์ให้อัตโนมัติทันที
+                </div>
+              </div>
+            `,
+            showCancelButton: true,
+            confirmButtonColor: "#2563eb",
+            cancelButtonColor: "#64748b",
+            confirmButtonText: "ไปที่หน้าเชื่อมต่อ Google Sheets",
+            cancelButtonText: "รับทราบ / ไว้ทีหลัง"
+          });
+
+          if (alertRes.isConfirmed) {
+            switchTab("tab-settings");
+          }
+        }
 
         // ดึงข้อมูลซิงค์เพิ่มเติมในพื้นหลัง (Background Sync)
         loadData().catch(e => console.warn("Background loadData error:", e));
@@ -2147,6 +2327,19 @@ document.addEventListener("DOMContentLoaded", () => {
         initLucide();
       }
     });
+
+    // Edit Modal File Upload Triggers (ปุ่มเพิ่มรูป/ถ่ายรูปใหม่ในหน้าแก้ไข)
+    const btnEditAddAtt = document.getElementById("btn-edit-add-attachment");
+    const editFileInput = document.getElementById("edit-file-input-multiple");
+    if (btnEditAddAtt && editFileInput) {
+      btnEditAddAtt.addEventListener("click", () => editFileInput.click());
+      editFileInput.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+          handleEditFilesUpload(e.target.files);
+          e.target.value = "";
+        }
+      });
+    }
 
     // Form Edit Leave Submit
     document.getElementById("form-edit-leave")?.addEventListener("submit", async (e) => {
@@ -2179,16 +2372,55 @@ document.addEventListener("DOMContentLoaded", () => {
         start_date: startDate,
         end_date: endDate,
         total_days: totalDays,
-        reason: document.getElementById("edit-leave-reason").value.trim()
+        reason: document.getElementById("edit-leave-reason").value.trim(),
+        attachments: state.editAttachments || []
       };
 
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> กำลังบันทึก...`;
+      }
+
       try {
-        await window.leaveAPI.updateLeaveRequest(payload);
-        Swal.fire({ icon: "success", title: "แก้ไขข้อมูลการลาเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
+        const res = await window.leaveAPI.updateLeaveRequest(payload);
+        
+        // อัปเดตใน state ทันที
+        const reqIdx = state.leaveRequests.findIndex(r => String(r.request_id).trim() === String(requestId).trim());
+        if (reqIdx !== -1) {
+          state.leaveRequests[reqIdx] = {
+            ...state.leaveRequests[reqIdx],
+            ...payload,
+            attachments: res.attachments || payload.attachments,
+            updated_at: new Date().toISOString()
+          };
+        }
+
+        Swal.fire({
+          icon: "success",
+          title: "บันทึกการแก้ไขเรียบร้อยแล้ว",
+          text: "ข้อมูลวันลาและรูปภาพหลักฐานได้รับการปรับปรุงเรียบร้อยแล้ว",
+          timer: 1800,
+          showConfirmButton: false
+        });
         document.getElementById("modal-edit-leave").classList.add("hidden");
+
+        updateDashboardKPIs();
+        renderDashboardCharts();
+        renderDashboardRecentTable();
+        renderLeaveHistoryTable();
+        renderReports();
+        renderEmployeeCards();
+
         await loadData();
       } catch (err) {
-        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการบันทึก", text: err.message });
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `บันทึกการแก้ไข`;
+        }
+        initLucide();
       }
     });
 
@@ -2432,6 +2664,116 @@ document.addEventListener("DOMContentLoaded", () => {
       updateConnectionIndicator();
       Swal.fire({ icon: "success", title: "บันทึกการตั้งค่าแล้ว", timer: 1500, showConfirmButton: false });
       loadData();
+    });
+
+    // Mobile Sync: Copy Mobile Link
+    document.getElementById("btn-copy-mobile-sync-link")?.addEventListener("click", async () => {
+      const gasUrl = window.leaveAPI.getGasUrl();
+      if (!gasUrl) {
+        Swal.fire({
+          icon: "info",
+          title: "ยังไม่ได้ระบุ Web App URL",
+          text: "กรุณาระบุและบันทึก Google Apps Script Web App URL ในช่องด้านบนก่อน เพื่อสร้างลิงก์สำหรับมือถือ"
+        });
+        return;
+      }
+      const syncUrl = window.location.origin + window.location.pathname + "?gasUrl=" + encodeURIComponent(gasUrl);
+      
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(syncUrl);
+        } else {
+          const tempInput = document.createElement("textarea");
+          tempInput.value = syncUrl;
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          document.execCommand("copy");
+          document.body.removeChild(tempInput);
+        }
+
+        Swal.fire({
+          icon: "success",
+          title: "คัดลอกลิงก์สำเร็จ!",
+          html: `
+            <div class="text-left text-xs bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1.5 text-slate-700">
+              <p class="font-bold text-blue-700">📲 วิธีใช้งาน:</p>
+              <p>1. ส่งลิงก์นี้เข้าไปในแชท LINE หรือแอปส่งข้อความ</p>
+              <p>2. เปิดลิงก์นี้บน iPhone หรือมือถือของคุณ</p>
+              <p>3. มือถือจะเชื่อมต่อกับ Google Sheet เดียวกันทันที ไม่ต้องพิมพ์ URL เอง!</p>
+            </div>
+          `,
+          confirmButtonText: "ตกลง"
+        });
+      } catch (e) {
+        Swal.fire({ icon: "error", title: "ไม่สามารถคัดลอกได้", text: "กรุณาคัดลอกจากกล่องข้อความโดยตรงครับ" });
+      }
+    });
+
+    // Mobile Sync: Show QR Code
+    document.getElementById("btn-show-mobile-qr")?.addEventListener("click", () => {
+      const gasUrl = window.leaveAPI.getGasUrl();
+      if (!gasUrl) {
+        Swal.fire({
+          icon: "info",
+          title: "ยังไม่ได้ระบุ Web App URL",
+          text: "กรุณาระบุและบันทึก Google Apps Script Web App URL ในช่องด้านบนก่อน เพื่อสร้าง QR Code"
+        });
+        return;
+      }
+      const syncUrl = window.location.origin + window.location.pathname + "?gasUrl=" + encodeURIComponent(gasUrl);
+      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(syncUrl)}`;
+
+      Swal.fire({
+        title: "สแกนด้วยกล้องมือถือ (iPhone/Android)",
+        html: `
+          <div class="flex flex-col items-center justify-center p-2 space-y-3">
+            <img src="${qrImageUrl}" alt="Mobile Sync QR Code" class="w-56 h-56 rounded-xl border border-slate-200 shadow-md p-1 bg-white" />
+            <p class="text-xs text-slate-600 leading-relaxed max-w-sm text-center">
+              ใช้กล้อง iPhone หรือแอป LINE สแกน QR Code นี้<br>
+              เพื่อเปิดระบบลางานที่ <b>เชื่อมต่อ Google Sheets</b> เรียบร้อยแล้วทันที!
+            </p>
+          </div>
+        `,
+        confirmButtonText: "ปิดหน้าต่าง",
+        confirmButtonColor: "#2563eb"
+      });
+    });
+
+    // Sync Pending Requests Now
+    document.getElementById("btn-sync-pending-now")?.addEventListener("click", async () => {
+      if (!window.leaveAPI.isLive()) {
+        Swal.fire({
+          icon: "warning",
+          title: "ยังไม่ได้เชื่อมต่อ Google Sheets",
+          text: "กรุณาระบุ URL ด้านบนและกดบันทึกก่อนทำการซิงค์ครับ"
+        });
+        return;
+      }
+
+      const btn = document.getElementById("btn-sync-pending-now");
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> กำลังซิงค์...`;
+
+      try {
+        const res = await window.leaveAPI.autoSyncPendingRequests();
+        await loadData();
+        Swal.fire({
+          icon: "success",
+          title: "ซิงค์ข้อมูลเรียบร้อยแล้ว",
+          text: res.syncedCount > 0 ? `นำส่งรายการลาที่ค้างส่ง ${res.syncedCount} รายการขึ้น Google Sheet แล้ว` : "ไม่มีรายการลาค้างส่งในอุปกรณ์นี้"
+        });
+      } catch (err) {
+        Swal.fire({ icon: "error", title: "การซิงค์ล้มเหลว", text: err.message });
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> <span>ซิงค์รายการค้างส่งขึ้นชีตทันที</span>`;
+        initLucide();
+      }
+    });
+
+    // Mobile connection indicator click
+    document.getElementById("mobile-db-indicator")?.addEventListener("click", () => {
+      switchTab("tab-settings");
     });
 
     // Settings: Switch to Demo Mode

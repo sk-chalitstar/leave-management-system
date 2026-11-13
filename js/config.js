@@ -5,6 +5,7 @@
 const CONFIG = {
   APP_NAME: "LeaveFlow Pro",
   APP_TITLE: "ระบบจัดการบันทึกการลางานแบบครบวงจร",
+  DEFAULT_GAS_URL: "", // สามารถใส่ Google Apps Script Web App URL เริ่มต้นตรงนี้เพื่อให้ทุกเครื่องเชื่อมต่อชีตเดียวกันอัตโนมัติ
   STORAGE_KEYS: {
     GAS_URL: "lms_gas_webapp_url",
     APP_MODE: "lms_mode", // 'live' or 'demo'

@@ -486,16 +486,31 @@ function handleUpdateLeaveRequest(ss, payload) {
   }
 
   // Update specific fields:
-  // 5: leave_type, 6: start_date, 7: end_date, 8: leave_duration_type, 9: total_days, 10: reason, 16: updated_at
+  // 5: leave_type, 6: start_date, 7: end_date, 8: leave_duration_type, 9: total_days, 10: reason, 11: attachments_json, 16: updated_at
   if (payload.leave_type) sheet.getRange(foundRow, 5).setValue(payload.leave_type);
   if (payload.start_date) sheet.getRange(foundRow, 6).setValue(payload.start_date);
   if (payload.end_date) sheet.getRange(foundRow, 7).setValue(payload.end_date);
   if (payload.leave_duration_type) sheet.getRange(foundRow, 8).setValue(payload.leave_duration_type);
   if (payload.total_days !== undefined) sheet.getRange(foundRow, 9).setValue(Number(payload.total_days));
   if (payload.reason) sheet.getRange(foundRow, 10).setValue(payload.reason);
-  sheet.getRange(foundRow, 16).setValue(new Date().toISOString());
 
-  return { success: true, message: "แก้ไขข้อมูลคำขอลาเรียบร้อยแล้ว" };
+  // อัปเดตรูปภาพ/เอกสารแนบ (อัปโหลดรูปใหม่ขึ้น Google Drive หากมี)
+  let uploadedAttachments = [];
+  if (payload.attachments !== undefined) {
+    if (Array.isArray(payload.attachments)) {
+      uploadedAttachments = uploadAttachmentsToDrive(payload.attachments);
+    }
+    sheet.getRange(foundRow, 11).setValue(JSON.stringify(uploadedAttachments));
+  }
+
+  sheet.getRange(foundRow, 16).setValue(new Date().toISOString());
+  SpreadsheetApp.flush();
+
+  return { 
+    success: true, 
+    message: "แก้ไขข้อมูลคำขอลาเรียบร้อยแล้ว",
+    attachments: uploadedAttachments
+  };
 }
 
 /**
