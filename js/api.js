@@ -222,8 +222,36 @@ class LeaveAPI {
 
   /**
    * ยื่นคำขอลาใหม่ (Submit Leave)
+   * บันทึกคำขอลาลงทั้ง LocalStorage ทันที และซิงค์ขึ้น Google Sheets เพื่อให้ข้อมูลแสดงผลบนมือถือได้แบบ Real-time 100%
    */
   async submitLeaveRequest(requestData) {
+    let requestId = "LV-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + Math.floor(1000 + Math.random() * 9000);
+    
+    // สร้าง Record การลาใหม่สถานะ Approved ทันที
+    const newRecord = {
+      ...requestData,
+      request_id: requestId,
+      status: "Approved",
+      approved_by: "ระบบบันทึกอัตโนมัติ",
+      rejection_reason: "",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // 1. นำออกจาก Deleted IDs ทันทีถ้าเคยมี
+    try {
+      let deletedIds = JSON.parse(localStorage.getItem("LEAVE_DELETED_REQUEST_IDS") || "[]");
+      deletedIds = deletedIds.filter(id => id !== requestId);
+      localStorage.setItem("LEAVE_DELETED_REQUEST_IDS", JSON.stringify(deletedIds));
+    } catch (e) {}
+
+    // 2. บันทึกลง LocalStorage ทันทีเพื่อให้แสดงผลได้ทันทีโดยไม่ต้องรอเครือข่าย
+    let leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+    leaves = leaves.filter(l => String(l.request_id).trim() !== requestId);
+    leaves.unshift(newRecord);
+    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+
+    // 3. หากเชื่อมต่อ Google Sheets ให้ส่งข้อมูลไปบันทึกลงชีต
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -235,37 +263,42 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result.success) {
-          return result;
+        if (result && result.success) {
+          if (result.request_id) {
+            newRecord.request_id = result.request_id;
+          }
+          if (result.attachments) {
+            newRecord.attachments = result.attachments;
+          }
+          // อัปเดตใน LocalStorage อีกครั้งด้วย ID/ไฟล์แนบที่ได้จาก Google Drive/Sheet
+          leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
+          const idx = leaves.findIndex(l => l.request_id === requestId || l.request_id === newRecord.request_id);
+          if (idx !== -1) {
+            leaves[idx] = newRecord;
+          } else {
+            leaves.unshift(newRecord);
+          }
+          localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
+
+          return {
+            success: true,
+            message: result.message || "บันทึกคำขอลาเรียบร้อยแล้ว",
+            request_id: newRecord.request_id,
+            record: newRecord,
+            attachments: newRecord.attachments
+          };
         }
-        throw new Error(result.message || "Failed to submit leave request to Google Sheets");
       } catch (err) {
-        console.warn("GAS submission error, saving to local instead:", err);
+        console.warn("GAS submission error, saved to local cache successfully:", err);
       }
     }
-
-    // Local / Offline fallback
-    const leaves = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS) || "[]");
-    const requestId = "LV-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + Math.floor(1000 + Math.random() * 9000);
-    
-    const localRecord = {
-      ...requestData,
-      request_id: requestId,
-      status: "Approved", // ปรับสถานะเริ่มต้นเป็น Approved ทันที
-      approved_by: "HR Administrator",
-      rejection_reason: "",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    leaves.unshift(localRecord);
-    localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(leaves));
 
     return {
       success: true,
       message: "บันทึกคำขอลาเรียบร้อยแล้ว",
-      request_id: requestId,
-      attachments: localRecord.attachments
+      request_id: newRecord.request_id,
+      record: newRecord,
+      attachments: newRecord.attachments
     };
   }
 

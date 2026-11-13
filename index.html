@@ -53,7 +53,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="css/style.css?v=2.6">
+  <link rel="stylesheet" href="css/style.css?v=2.8">
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col md:flex-row">
 
@@ -506,11 +506,11 @@
         </div>
       </section>
 
-      <!-- ==================== TAB: LEAVE HISTORY (ประวัติการลา - แก้ไขและลบได้) ==================== -->
+      <!-- ==================== TAB: LEAVE HISTORY (ประวัติการลา - ตาราง / การ์ด) ==================== -->
       <section id="tab-leave-history" class="tab-pane hidden space-y-5">
         <!-- Filter Toolbar -->
         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-          <div class="flex items-center flex-wrap gap-3 w-full md:w-auto">
+          <div class="flex items-center flex-wrap gap-2.5 w-full md:w-auto">
             <div class="relative w-full sm:w-64">
               <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
               <input type="text" id="filter-history-search" placeholder="ค้นหารหัส, ชื่อพนักงาน, แผนก..." class="w-full text-xs pl-9 pr-3 py-2 rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 border">
@@ -529,13 +529,27 @@
             </select>
           </div>
 
-          <div class="text-xs text-slate-500">
-            <span id="history-total-count" class="font-semibold text-slate-700">แสดงทั้งหมด 0 รายการ</span>
+          <div class="flex items-center justify-between sm:justify-end gap-3 w-full md:w-auto">
+            <!-- View Mode Switcher (ตาราง vs การ์ด) -->
+            <div class="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 shrink-0">
+              <button type="button" id="btn-history-view-table" class="view-toggle-btn active px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all bg-white text-blue-600 shadow-xs" title="แสดงแบบตาราง">
+                <i data-lucide="table" class="w-3.5 h-3.5"></i>
+                <span class="text-xs">ตาราง</span>
+              </button>
+              <button type="button" id="btn-history-view-cards" class="view-toggle-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all text-slate-500 hover:text-slate-700" title="แสดงแบบการ์ด">
+                <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>
+                <span class="text-xs">การ์ด</span>
+              </button>
+            </div>
+
+            <div class="text-xs text-slate-500 whitespace-nowrap">
+              <span id="history-total-count" class="font-semibold text-slate-700">แสดงทั้งหมด 0 รายการ</span>
+            </div>
           </div>
         </div>
 
-        <!-- History Table -->
-        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <!-- History Table View -->
+        <div id="history-table-container" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left text-xs text-slate-600">
               <thead class="bg-slate-50 text-slate-700 border-b border-slate-200 uppercase tracking-wider text-[11px]">
@@ -556,6 +570,11 @@
               </tbody>
             </table>
           </div>
+        </div>
+
+        <!-- History Cards View (Mobile Optimized) -->
+        <div id="history-cards-container" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          <!-- Dynamic History Cards -->
         </div>
       </section>
 
@@ -642,19 +661,33 @@
       <section id="tab-reports" class="tab-pane hidden space-y-6">
         <!-- Filter Card -->
         <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
             <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
               <i data-lucide="filter" class="w-4 h-4 text-blue-600"></i>
               ตัวกรองประวัติการลาย้อนหลัง
             </h4>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center flex-wrap gap-2">
+              <!-- View Mode Switcher (ตาราง vs การ์ด) -->
+              <div class="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 shrink-0">
+                <button type="button" id="btn-report-view-table" class="view-toggle-btn active px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all bg-white text-blue-600 shadow-xs" title="แสดงแบบตาราง">
+                  <i data-lucide="table" class="w-3.5 h-3.5"></i>
+                  <span class="text-xs">ตาราง</span>
+                </button>
+                <button type="button" id="btn-report-view-cards" class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all text-slate-500 hover:text-slate-700" title="แสดงแบบการ์ด">
+                  <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>
+                  <span class="text-xs">การ์ด</span>
+                </button>
+              </div>
+
               <button id="btn-export-excel" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors">
                 <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
-                <span>Export Excel</span>
+                <span class="hidden sm:inline">Export Excel</span>
+                <span class="sm:hidden text-xs">Excel</span>
               </button>
               <button id="btn-print-report" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors">
                 <i data-lucide="printer" class="w-4 h-4"></i>
-                <span>พิมพ์รายงาน (Print)</span>
+                <span class="hidden sm:inline">พิมพ์รายงาน (Print)</span>
+                <span class="sm:hidden text-xs">พิมพ์</span>
               </button>
             </div>
           </div>
@@ -702,8 +735,8 @@
             <!-- Dynamic Quota Breakdown: พักร้อน 3/10, ลากิจ, ลาป่วย, อื่นๆ -->
           </div>
 
-          <!-- Report Data Table -->
-          <div class="overflow-x-auto">
+          <!-- Report Data Table View (Used for Table View & Official Printing) -->
+          <div id="report-table-container" class="overflow-x-auto">
             <table class="w-full text-left text-xs text-slate-700">
               <thead class="bg-slate-100 text-slate-800 font-semibold border-b border-slate-300">
                 <tr>
@@ -723,6 +756,11 @@
                 <!-- Dynamic Rows -->
               </tbody>
             </table>
+          </div>
+
+          <!-- Report Cards View (Mobile Friendly on Screen, Hidden during Print) -->
+          <div id="report-cards-container" class="hidden no-print grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            <!-- Dynamic Report Cards -->
           </div>
 
           <!-- Report Footer Summary -->
@@ -1297,8 +1335,8 @@
   </nav>
 
   <!-- Scripts with Cache Buster -->
-  <script src="js/config.js?v=2.6"></script>
-  <script src="js/api.js?v=2.6"></script>
-  <script src="js/app.js?v=2.6"></script>
+  <script src="js/config.js?v=2.8"></script>
+  <script src="js/api.js?v=2.8"></script>
+  <script src="js/app.js?v=2.8"></script>
 </body>
 </html>

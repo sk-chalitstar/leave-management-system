@@ -11,6 +11,8 @@ document.addEventListener("DOMContentLoaded", () => {
     currentEmployee: null,
     tempAttachments: [], // รายการไฟล์แนบชั่วคราวในฟอร์มยื่นคำขอ
     selectedLeaveRequest: null,
+    historyViewMode: localStorage.getItem("LEAVE_HISTORY_VIEW") || (window.innerWidth < 768 ? "cards" : "table"),
+    reportViewMode: localStorage.getItem("LEAVE_REPORT_VIEW") || (window.innerWidth < 768 ? "cards" : "table"),
     charts: {
       leaveType: null,
       department: null
@@ -116,7 +118,25 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const data = await window.leaveAPI.fetchAllData();
       state.employees = data.employees || [];
-      state.leaveRequests = data.leaveRequests || [];
+      
+      const fetchedRequests = data.leaveRequests || [];
+      // รวมข้อมูลที่ดึงมาใหม่เข้ากับคำขอที่เพิ่งยื่นในเครื่อง เพื่อป้องกันปัญหาการดีเลย์ของ Google Sheets
+      let deletedIds = [];
+      try {
+        deletedIds = JSON.parse(localStorage.getItem("LEAVE_DELETED_REQUEST_IDS") || "[]");
+      } catch (e) {}
+
+      const mergedRequests = [...fetchedRequests];
+      state.leaveRequests.forEach(existing => {
+        if (!deletedIds.includes(String(existing.request_id).trim())) {
+          if (!mergedRequests.some(r => String(r.request_id).trim() === String(existing.request_id).trim())) {
+            mergedRequests.unshift(existing);
+          }
+        }
+      });
+
+      state.leaveRequests = mergedRequests;
+      localStorage.setItem(CONFIG.STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(mergedRequests));
       state.holidays = data.holidays || [];
 
       // รักษา state.currentEmployee ให้ซิงค์กับข้อมูลใหม่ล่าสุด
@@ -776,12 +796,91 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   /**
-   * 2. แท็บประวัติการลา (Leave History - แก้ไขและลบได้)
+   * View Mode Controls: ควบคุมการสลับมุมมอง "ตาราง" (Table) vs "การ์ด" (Cards)
+   */
+  function updateHistoryViewModeUI() {
+    const mode = state.historyViewMode || (window.innerWidth < 768 ? "cards" : "table");
+    const tableContainer = document.getElementById("history-table-container");
+    const cardsContainer = document.getElementById("history-cards-container");
+    const tableBtn = document.getElementById("btn-history-view-table");
+    const cardsBtn = document.getElementById("btn-history-view-cards");
+
+    if (!tableContainer || !cardsContainer) return;
+
+    if (mode === "cards") {
+      tableContainer.classList.add("hidden");
+      cardsContainer.classList.remove("hidden");
+
+      cardsBtn?.classList.add("bg-white", "text-blue-600", "shadow-xs");
+      cardsBtn?.classList.remove("text-slate-500", "hover:text-slate-700");
+
+      tableBtn?.classList.remove("bg-white", "text-blue-600", "shadow-xs");
+      tableBtn?.classList.add("text-slate-500", "hover:text-slate-700");
+    } else {
+      tableContainer.classList.remove("hidden");
+      cardsContainer.classList.add("hidden");
+
+      tableBtn?.classList.add("bg-white", "text-blue-600", "shadow-xs");
+      tableBtn?.classList.remove("text-slate-500", "hover:text-slate-700");
+
+      cardsBtn?.classList.remove("bg-white", "text-blue-600", "shadow-xs");
+      cardsBtn?.classList.add("text-slate-500", "hover:text-slate-700");
+    }
+  }
+
+  window.setHistoryViewMode = function(mode) {
+    state.historyViewMode = mode;
+    try {
+      localStorage.setItem("LEAVE_HISTORY_VIEW", mode);
+    } catch (e) {}
+    updateHistoryViewModeUI();
+  };
+
+  function updateReportViewModeUI() {
+    const mode = state.reportViewMode || (window.innerWidth < 768 ? "cards" : "table");
+    const tableContainer = document.getElementById("report-table-container");
+    const cardsContainer = document.getElementById("report-cards-container");
+    const tableBtn = document.getElementById("btn-report-view-table");
+    const cardsBtn = document.getElementById("btn-report-view-cards");
+
+    if (!tableContainer || !cardsContainer) return;
+
+    if (mode === "cards") {
+      tableContainer.classList.add("hidden");
+      cardsContainer.classList.remove("hidden");
+
+      cardsBtn?.classList.add("bg-white", "text-blue-600", "shadow-xs");
+      cardsBtn?.classList.remove("text-slate-500", "hover:text-slate-700");
+
+      tableBtn?.classList.remove("bg-white", "text-blue-600", "shadow-xs");
+      tableBtn?.classList.add("text-slate-500", "hover:text-slate-700");
+    } else {
+      tableContainer.classList.remove("hidden");
+      cardsContainer.classList.add("hidden");
+
+      tableBtn?.classList.add("bg-white", "text-blue-600", "shadow-xs");
+      tableBtn?.classList.remove("text-slate-500", "hover:text-slate-700");
+
+      cardsBtn?.classList.remove("bg-white", "text-blue-600", "shadow-xs");
+      cardsBtn?.classList.add("text-slate-500", "hover:text-slate-700");
+    }
+  }
+
+  window.setReportViewMode = function(mode) {
+    state.reportViewMode = mode;
+    try {
+      localStorage.setItem("LEAVE_REPORT_VIEW", mode);
+    } catch (e) {}
+    updateReportViewModeUI();
+  };
+
+  /**
+   * 2. แท็บประวัติการลา (Leave History - รองรับทั้งแบบตาราง และแบบการ์ดบนมือถือ)
    */
   function renderLeaveHistoryTable() {
     const tbody = document.getElementById("history-table-body");
+    const cardsContainer = document.getElementById("history-cards-container");
     const countSpan = document.getElementById("history-total-count");
-    if (!tbody) return;
 
     const searchTerm = (document.getElementById("filter-history-search")?.value || "").toLowerCase().trim();
     const deptFilter = document.getElementById("filter-history-dept")?.value || "";
@@ -794,10 +893,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (searchTerm) {
       filtered = filtered.filter(r => {
         return (
-          String(r.request_id).toLowerCase().includes(searchTerm) ||
-          String(r.emp_id).toLowerCase().includes(searchTerm) ||
-          String(r.emp_name).toLowerCase().includes(searchTerm) ||
-          String(r.department).toLowerCase().includes(searchTerm)
+          String(r.request_id || "").toLowerCase().includes(searchTerm) ||
+          String(r.emp_id || "").toLowerCase().includes(searchTerm) ||
+          String(r.emp_name || "").toLowerCase().includes(searchTerm) ||
+          String(r.department || "").toLowerCase().includes(searchTerm)
         );
       });
     }
@@ -807,75 +906,181 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-slate-400">ไม่พบประวัติการลา</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-slate-400">ไม่พบประวัติการลา</td></tr>`;
+      if (cardsContainer) {
+        cardsContainer.innerHTML = `
+          <div class="col-span-full text-center py-12 px-4 text-slate-400 bg-white rounded-2xl border border-slate-200">
+            <i data-lucide="clipboard-x" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            <p class="font-medium text-slate-500 text-xs">ไม่พบประวัติการลา</p>
+          </div>
+        `;
+      }
+      updateHistoryViewModeUI();
+      initLucide();
       return;
     }
 
-    tbody.innerHTML = filtered.map(req => {
-      const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
-      const statusBadge = getStatusBadge(req.status);
-      const attachmentsCount = (req.attachments && Array.isArray(req.attachments)) ? req.attachments.length : 0;
-      
-      const createdFormatted = LeaveAPI.formatDateTime(req.created_at);
-      const startDMY = LeaveAPI.formatDateDMY(req.start_date);
-      const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+    // 1. เรนเดอร์แบบตาราง (Table View)
+    if (tbody) {
+      tbody.innerHTML = filtered.map(req => {
+        const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
+        const statusBadge = getStatusBadge(req.status);
+        const attachmentsCount = (req.attachments && Array.isArray(req.attachments)) ? req.attachments.length : 0;
+        
+        const createdFormatted = LeaveAPI.formatDateTime(req.created_at);
+        const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+        const endDMY = LeaveAPI.formatDateDMY(req.end_date);
 
-      let durationLabel = `${startDMY} ถึง ${endDMY}`;
-      if (req.leave_duration_type === "hourly") {
-        durationLabel = `${startDMY} <span class="text-amber-700 block font-bold text-[10px]">(รายชั่วโมง ${req.leave_hours || ""} ชม.)</span>`;
-      } else if (req.leave_duration_type === "morning") {
-        durationLabel = `${startDMY} <span class="text-blue-600 block text-[10px]">(ครึ่งวันเช้า)</span>`;
-      } else if (req.leave_duration_type === "afternoon") {
-        durationLabel = `${startDMY} <span class="text-blue-600 block text-[10px]">(ครึ่งวันบ่าย)</span>`;
-      }
+        let durationLabel = `${startDMY} ถึง ${endDMY}`;
+        if (req.leave_duration_type === "hourly") {
+          durationLabel = `${startDMY} <span class="text-amber-700 block font-bold text-[10px]">(รายชั่วโมง ${req.leave_hours || ""} ชม.)</span>`;
+        } else if (req.leave_duration_type === "morning") {
+          durationLabel = `${startDMY} <span class="text-blue-600 block text-[10px]">(ครึ่งวันเช้า)</span>`;
+        } else if (req.leave_duration_type === "afternoon") {
+          durationLabel = `${startDMY} <span class="text-blue-600 block text-[10px]">(ครึ่งวันบ่าย)</span>`;
+        }
 
-      return `
-        <tr class="hover:bg-slate-50 transition-colors">
-          <td class="py-3 px-4">
-            <span class="font-mono font-bold text-slate-800 block">${req.request_id}</span>
-            <span class="text-[10px] text-slate-400">${createdFormatted}</span>
-          </td>
-          <td class="py-3 px-4">
-            <span class="font-semibold text-slate-800 block">${escapeHtml(req.emp_name)}</span>
-            <span class="text-[11px] text-slate-400">${escapeHtml(req.emp_id)} • ${escapeHtml(req.department)}</span>
-          </td>
-          <td class="py-3 px-4">
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${typeInfo.badgeClass}">
-              ${typeInfo.name.split(" ")[0]}
-            </span>
-          </td>
-          <td class="py-3 px-4 font-mono text-xs text-slate-700">
-            ${durationLabel}
-          </td>
-          <td class="py-3 px-4 text-center font-bold text-slate-800">${req.total_days}</td>
-          <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${escapeHtml(req.reason)}">
-            ${escapeHtml(req.reason)}
-          </td>
-          <td class="py-3 px-4">
-            ${attachmentsCount > 0 
-              ? `<span class="inline-flex items-center gap-1 text-[11px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  <i data-lucide="paperclip" class="w-3 h-3"></i> ${attachmentsCount} ไฟล์
-                </span>` 
-              : `<span class="text-slate-400 text-[11px]">-</span>`}
-          </td>
-          <td class="py-3 px-4 text-center">${statusBadge}</td>
-          <td class="py-3 px-4 text-right">
-            <div class="flex items-center justify-end gap-1.5">
-              <button onclick="window.openEditLeaveModal('${req.request_id}')" class="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="แก้ไขการลา">
-                <i data-lucide="edit-3" class="w-4 h-4"></i>
+        return `
+          <tr class="hover:bg-slate-50 transition-colors">
+            <td class="py-3 px-4">
+              <span class="font-mono font-bold text-slate-800 block">${escapeHtml(req.request_id)}</span>
+              <span class="text-[10px] text-slate-400">${createdFormatted}</span>
+            </td>
+            <td class="py-3 px-4">
+              <span class="font-semibold text-slate-800 block">${escapeHtml(req.emp_name)}</span>
+              <span class="text-[11px] text-slate-400">${escapeHtml(req.emp_id)} • ${escapeHtml(req.department)}</span>
+            </td>
+            <td class="py-3 px-4">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${typeInfo.badgeClass}">
+                ${typeInfo.name.split(" ")[0]}
+              </span>
+            </td>
+            <td class="py-3 px-4 font-mono text-xs text-slate-700">
+              ${durationLabel}
+            </td>
+            <td class="py-3 px-4 text-center font-bold text-slate-800">${req.total_days}</td>
+            <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${escapeHtml(req.reason)}">
+              ${escapeHtml(req.reason)}
+            </td>
+            <td class="py-3 px-4">
+              ${attachmentsCount > 0 
+                ? `<span class="inline-flex items-center gap-1 text-[11px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                    <i data-lucide="paperclip" class="w-3 h-3"></i> ${attachmentsCount} ไฟล์
+                  </span>` 
+                : `<span class="text-slate-400 text-[11px]">-</span>`}
+            </td>
+            <td class="py-3 px-4 text-center">${statusBadge}</td>
+            <td class="py-3 px-4 text-right">
+              <div class="flex items-center justify-end gap-1.5">
+                <button onclick="window.openEditLeaveModal('${escapeHtml(req.request_id)}')" class="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="แก้ไขการลา">
+                  <i data-lucide="edit-3" class="w-4 h-4"></i>
+                </button>
+                <button onclick="window.confirmDeleteLeave('${escapeHtml(req.request_id)}')" class="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors" title="ลบรายการลา">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+                <button onclick="window.viewLeaveDetail('${escapeHtml(req.request_id)}')" class="p-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors" title="ดูรายละเอียด / พิมพ์ใบลา">
+                  <i data-lucide="printer" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    // 2. เรนเดอร์แบบการ์ด (Cards View - ออกแบบสำหรับมือถือและหน้าจอสัมผัสโดยเฉพาะ)
+    if (cardsContainer) {
+      cardsContainer.innerHTML = filtered.map(req => {
+        const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
+        const statusBadge = getStatusBadge(req.status);
+        const attachmentsCount = (req.attachments && Array.isArray(req.attachments)) ? req.attachments.length : 0;
+        
+        const createdFormatted = LeaveAPI.formatDateTime(req.created_at);
+        const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+        const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+
+        let durationLabel = `${startDMY} ถึง ${endDMY}`;
+        if (req.leave_duration_type === "hourly") {
+          durationLabel = `${startDMY} (รายชั่วโมง ${req.leave_hours || ""} ชม.)`;
+        } else if (req.leave_duration_type === "morning") {
+          durationLabel = `${startDMY} (ครึ่งวันเช้า)`;
+        } else if (req.leave_duration_type === "afternoon") {
+          durationLabel = `${startDMY} (ครึ่งวันบ่าย)`;
+        }
+
+        return `
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col justify-between hover:border-blue-300 transition-all space-y-3">
+            <div>
+              <!-- Card Header: ID & Status -->
+              <div class="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
+                <div>
+                  <span class="font-mono font-bold text-xs text-blue-600 block">${escapeHtml(req.request_id)}</span>
+                  <span class="text-[10px] text-slate-400">${createdFormatted}</span>
+                </div>
+                <div>${statusBadge}</div>
+              </div>
+
+              <!-- Employee Info -->
+              <div class="py-2 flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-full bg-blue-50 text-blue-600 font-bold flex items-center justify-center text-xs shrink-0 border border-blue-100">
+                  ${escapeHtml((req.emp_name || "E").charAt(0))}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h4 class="font-bold text-slate-800 text-xs truncate">${escapeHtml(req.emp_name)}</h4>
+                  <p class="text-[10px] text-slate-400 truncate">${escapeHtml(req.emp_id)} • ${escapeHtml(req.department)}</p>
+                </div>
+              </div>
+
+              <!-- Leave Details Box -->
+              <div class="bg-slate-50/80 rounded-xl p-2.5 space-y-1.5 text-xs border border-slate-100">
+                <div class="flex items-center justify-between">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${typeInfo.badgeClass}">
+                    ${typeInfo.name.split(" ")[0]}
+                  </span>
+                  <span class="font-bold text-blue-700 font-mono text-xs bg-white px-2 py-0.5 rounded border border-slate-200">
+                    ${req.total_days} วันทำการ
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-1.5 text-[11px] text-slate-600">
+                  <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-500 shrink-0"></i>
+                  <span>${durationLabel}</span>
+                </div>
+
+                ${req.reason ? `
+                  <div class="pt-1 border-t border-slate-200/60 text-[11px] text-slate-600 line-clamp-2">
+                    <span class="font-semibold text-slate-700">เหตุผล:</span> ${escapeHtml(req.reason)}
+                  </div>
+                ` : ""}
+
+                ${attachmentsCount > 0 ? `
+                  <div class="pt-1">
+                    <span class="inline-flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-medium">
+                      <i data-lucide="paperclip" class="w-3 h-3"></i> ไฟล์แนบ ${attachmentsCount} รายการ
+                    </span>
+                  </div>
+                ` : ""}
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="pt-2 border-t border-slate-100 flex items-center justify-end gap-1.5">
+              <button type="button" onclick="window.viewLeaveDetail('${escapeHtml(req.request_id)}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
+                <i data-lucide="printer" class="w-3.5 h-3.5"></i> ดูใบลา
               </button>
-              <button onclick="window.confirmDeleteLeave('${req.request_id}')" class="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors" title="ลบรายการลา">
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <button type="button" onclick="window.openEditLeaveModal('${escapeHtml(req.request_id)}')" class="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i> แก้ไข
               </button>
-              <button onclick="window.viewLeaveDetail('${req.request_id}')" class="p-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors" title="ดูรายละเอียด / พิมพ์ใบลา">
-                <i data-lucide="printer" class="w-4 h-4"></i>
+              <button type="button" onclick="window.confirmDeleteLeave('${escapeHtml(req.request_id)}')" class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-semibold flex items-center transition-colors" title="ลบรายการ">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               </button>
             </div>
-          </td>
-        </tr>
-      `;
-    }).join("");
+          </div>
+        `;
+      }).join("");
+    }
 
+    updateHistoryViewModeUI();
     initLucide();
   }
 
@@ -1434,46 +1639,131 @@ document.addEventListener("DOMContentLoaded", () => {
       periodText.textContent = `ข้อมูล ณ วันที่: ${new Date().toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })} ${startDate && endDate ? `(ช่วงวันที่ ${startDate} ถึง ${endDate})` : ""}`;
     }
 
+    const cardsContainer = document.getElementById("report-cards-container");
+
     if (summaryText) {
       const totalDays = filtered.reduce((acc, curr) => acc + Number(curr.total_days || 0), 0);
       summaryText.textContent = `รวมรายการขอลาทั้งสิ้น ${filtered.length} รายการ (รวม ${totalDays} วันทำการ)`;
     }
 
-    if (!tbody) return;
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">ไม่พบประวัติการลาตามเงื่อนไขที่เลือก</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">ไม่พบประวัติการลาตามเงื่อนไขที่เลือก</td></tr>`;
+      if (cardsContainer) {
+        cardsContainer.innerHTML = `
+          <div class="col-span-full text-center py-10 px-4 text-slate-400 bg-white rounded-2xl border border-slate-200">
+            <i data-lucide="clipboard-x" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            <p class="font-medium text-slate-500 text-xs">ไม่พบประวัติการลาตามเงื่อนไขที่เลือก</p>
+          </div>
+        `;
+      }
+      updateReportViewModeUI();
+      initLucide();
       return;
     }
 
-    tbody.innerHTML = filtered.map((req, index) => {
-      const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
-      const startDMY = LeaveAPI.formatDateDMY(req.start_date);
-      const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+    // 1. เรนเดอร์แบบตาราง (Table View สำหรับ Desktop และการพิมพ์รายงานทางการ)
+    if (tbody) {
+      tbody.innerHTML = filtered.map((req, index) => {
+        const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
+        const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+        const endDMY = LeaveAPI.formatDateDMY(req.end_date);
 
-      return `
-        <tr>
-          <td class="py-2.5 px-3 text-center">${index + 1}</td>
-          <td class="py-2.5 px-3 font-mono">${req.emp_id}</td>
-          <td class="py-2.5 px-3 font-semibold">${escapeHtml(req.emp_name)}</td>
-          <td class="py-2.5 px-3">${escapeHtml(req.department)}</td>
-          <td class="py-2.5 px-3">${typeInfo.name.split(" ")[0]}</td>
-          <td class="py-2.5 px-3 font-mono text-[11px]">${startDMY} ถึง ${endDMY}</td>
-          <td class="py-2.5 px-3 text-center font-bold">${req.total_days}</td>
-          <td class="py-2.5 px-3 text-slate-600 max-w-xs truncate">${escapeHtml(req.reason)}</td>
-          <td class="py-2.5 px-3 text-center font-semibold text-emerald-700">บันทึกแล้ว</td>
-          <td class="py-2.5 px-3 text-right no-print">
-            <div class="flex items-center justify-end gap-1.5">
-              <button onclick="window.viewLeaveDetail('${req.request_id}')" class="p-1 text-blue-600 hover:text-blue-800 font-semibold text-xs inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 rounded px-2 py-1 transition-colors" title="ดูใบลาและสั่งพิมพ์">
+        return `
+          <tr>
+            <td class="py-2.5 px-3 text-center">${index + 1}</td>
+            <td class="py-2.5 px-3 font-mono">${escapeHtml(req.emp_id)}</td>
+            <td class="py-2.5 px-3 font-semibold">${escapeHtml(req.emp_name)}</td>
+            <td class="py-2.5 px-3">${escapeHtml(req.department)}</td>
+            <td class="py-2.5 px-3">${typeInfo.name.split(" ")[0]}</td>
+            <td class="py-2.5 px-3 font-mono text-[11px]">${startDMY} ถึง ${endDMY}</td>
+            <td class="py-2.5 px-3 text-center font-bold">${req.total_days}</td>
+            <td class="py-2.5 px-3 text-slate-600 max-w-xs truncate">${escapeHtml(req.reason)}</td>
+            <td class="py-2.5 px-3 text-center font-semibold text-emerald-700">บันทึกแล้ว</td>
+            <td class="py-2.5 px-3 text-right no-print">
+              <div class="flex items-center justify-end gap-1.5">
+                <button onclick="window.viewLeaveDetail('${escapeHtml(req.request_id)}')" class="p-1 text-blue-600 hover:text-blue-800 font-semibold text-xs inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 rounded px-2 py-1 transition-colors" title="ดูใบลาและสั่งพิมพ์">
+                  <i data-lucide="eye" class="w-3.5 h-3.5"></i> ดูใบลา
+                </button>
+                <button onclick="window.confirmDeleteLeave('${escapeHtml(req.request_id)}')" class="p-1 text-rose-600 hover:text-rose-800 font-semibold text-xs inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 rounded px-2 py-1 transition-colors" title="ลบรายการลาและคืนวันลา">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> ลบออก
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    // 2. เรนเดอร์แบบการ์ด (Cards View สำหรับหน้าจอมือถือ)
+    if (cardsContainer) {
+      cardsContainer.innerHTML = filtered.map((req, index) => {
+        const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
+        const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+        const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+
+        return `
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col justify-between hover:border-blue-300 transition-all space-y-3">
+            <div>
+              <!-- Top: Index, Type & Status -->
+              <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-md bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center font-mono">
+                    ${index + 1}
+                  </span>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold ${typeInfo.badgeClass}">
+                    ${typeInfo.name.split(" ")[0]}
+                  </span>
+                </div>
+                <span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                  <i data-lucide="check" class="w-3 h-3"></i> บันทึกแล้ว
+                </span>
+              </div>
+
+              <!-- Employee Info -->
+              <div class="py-2 flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-xs">
+                  ${escapeHtml((req.emp_name || "E").charAt(0))}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h4 class="font-bold text-slate-900 text-xs truncate">${escapeHtml(req.emp_name)}</h4>
+                  <p class="text-[11px] text-slate-500 truncate">รหัส: <span class="font-mono text-slate-700">${escapeHtml(req.emp_id)}</span> • ${escapeHtml(req.department)}</p>
+                </div>
+              </div>
+
+              <!-- Details Box -->
+              <div class="bg-slate-50 rounded-xl p-2.5 space-y-1.5 text-xs text-slate-700 border border-slate-100">
+                <div class="flex items-center justify-between">
+                  <span class="text-slate-500 text-[11px]">จำนวนวันทำการ:</span>
+                  <span class="font-extrabold text-blue-700 font-mono text-sm">${req.total_days} วัน</span>
+                </div>
+                <div class="flex items-center gap-1.5 text-[11px] text-slate-600">
+                  <i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+                  <span>ช่วงวันที่: <b>${startDMY}</b> ถึง <b>${endDMY}</b></span>
+                </div>
+                ${req.reason ? `
+                  <div class="pt-1 border-t border-slate-200/60 text-[11px] text-slate-600 line-clamp-2">
+                    <span class="font-semibold text-slate-700">เหตุผล:</span> ${escapeHtml(req.reason)}
+                  </div>
+                ` : ""}
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="pt-2 border-t border-slate-100 flex items-center justify-end gap-1.5">
+              <button type="button" onclick="window.viewLeaveDetail('${escapeHtml(req.request_id)}')" class="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
                 <i data-lucide="eye" class="w-3.5 h-3.5"></i> ดูใบลา
               </button>
-              <button onclick="window.confirmDeleteLeave('${req.request_id}')" class="p-1 text-rose-600 hover:text-rose-800 font-semibold text-xs inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 rounded px-2 py-1 transition-colors" title="ลบรายการลาและคืนวันลา">
+              <button type="button" onclick="window.confirmDeleteLeave('${escapeHtml(req.request_id)}')" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> ลบออก
               </button>
             </div>
-          </td>
-        </tr>
-      `;
-    }).join("");
+          </div>
+        `;
+      }).join("");
+    }
+
+    updateReportViewModeUI();
+    initLucide();
 
     initLucide();
   }
@@ -1615,6 +1905,7 @@ document.addEventListener("DOMContentLoaded", () => {
         pageTitle.textContent = "ประวัติการลา";
         pageSubtitle.textContent = "ตรวจสอบ แก้ไข หรือลบรายการลาที่บันทึกผิดพลาด";
         renderLeaveHistoryTable();
+        updateHistoryViewModeUI();
         break;
       case "tab-employee-balances":
         pageTitle.textContent = "สิทธิ์วันลาพนักงาน";
@@ -1630,6 +1921,7 @@ document.addEventListener("DOMContentLoaded", () => {
         pageTitle.textContent = "รายงาน & พิมพ์ประวัติ";
         pageSubtitle.textContent = "พิมพ์ใบลาทางการ Export Excel และออกรายงานสรุปย้อนหลัง";
         renderReports();
+        updateReportViewModeUI();
         break;
       case "tab-settings":
         pageTitle.textContent = "เชื่อมต่อ Google Sheets";
@@ -1788,19 +2080,65 @@ document.addEventListener("DOMContentLoaded", () => {
 
       try {
         const res = await window.leaveAPI.submitLeaveRequest(payload);
-        Swal.fire({
-          icon: "success",
-          title: "ยื่นใบลาสำเร็จ!",
-          text: `รหัสคำขอ: ${res.request_id || ""}`,
-          confirmButtonText: "ตกลง"
-        });
+        
+        // บันทึกลง in-memory state ทันที ไม่ต้องรอเครือข่าย เพื่อให้แสดงผลในประวัติและรายงานทันที 100%
+        const newRecord = res.record || {
+          ...payload,
+          request_id: res.request_id,
+          status: "Approved",
+          approved_by: "ระบบบันทึกอัตโนมัติ",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
 
+        const existsIdx = state.leaveRequests.findIndex(r => r.request_id === newRecord.request_id);
+        if (existsIdx !== -1) {
+          state.leaveRequests[existsIdx] = newRecord;
+        } else {
+          state.leaveRequests.unshift(newRecord);
+        }
+
+        // ล้างตัวกรองค้นหาในหน้าประวัติ เพื่อให้รายการใหม่ที่เพิ่งบันทึกแสดงขึ้นมาทันทีแน่นอน
+        const histSearch = document.getElementById("filter-history-search");
+        const histDept = document.getElementById("filter-history-dept");
+        const histType = document.getElementById("filter-history-type");
+        if (histSearch) histSearch.value = "";
+        if (histDept) histDept.value = "";
+        if (histType) histType.value = "";
+
+        // ล้างแบบฟอร์ม
         document.getElementById("form-leave-request").reset();
         state.tempAttachments = [];
         renderAttachmentsPreview();
         updateEmployeeLiveQuota(null);
-        await loadData();
+
+        // อัปเดตทุกหน้าจอทันที
+        updateDashboardKPIs();
+        renderDashboardCharts();
+        renderDashboardRecentTable();
+        renderLeaveHistoryTable();
+        renderReports();
+        renderEmployeeCards();
+
+        // สลับไปยังหน้าประวัติการลา
         switchTab("tab-leave-history");
+
+        await Swal.fire({
+          icon: "success",
+          title: "ยื่นใบลาสำเร็จ!",
+          html: `
+            <div class="text-left text-xs bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+              <p><b>รหัสคำขอ:</b> <span class="font-mono text-blue-600 font-bold">${res.request_id || ""}</span></p>
+              <p><b>พนักงาน:</b> ${escapeHtml(payload.emp_name)}</p>
+              <p><b>จำนวนวันลา:</b> <span class="text-blue-700 font-bold">${payload.total_days} วันทำการ</span></p>
+            </div>
+            <p class="text-xs text-emerald-600 font-semibold mt-2">✨ ระบบบันทึกข้อมูลและตัดยอดวันลาให้อัตโนมัติแล้ว</p>
+          `,
+          confirmButtonText: "ตกลง"
+        });
+
+        // ดึงข้อมูลซิงค์เพิ่มเติมในพื้นหลัง (Background Sync)
+        loadData().catch(e => console.warn("Background loadData error:", e));
       } catch (err) {
         Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการส่งคำขอ", text: err.message });
       } finally {
@@ -1868,6 +2206,12 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("filter-history-search")?.addEventListener("input", () => renderLeaveHistoryTable());
     document.getElementById("filter-history-dept")?.addEventListener("change", () => renderLeaveHistoryTable());
     document.getElementById("filter-history-type")?.addEventListener("change", () => renderLeaveHistoryTable());
+
+    // Toggle View Mode (สลับระหว่าง ตาราง vs การ์ด)
+    document.getElementById("btn-history-view-table")?.addEventListener("click", () => window.setHistoryViewMode("table"));
+    document.getElementById("btn-history-view-cards")?.addEventListener("click", () => window.setHistoryViewMode("cards"));
+    document.getElementById("btn-report-view-table")?.addEventListener("click", () => window.setReportViewMode("table"));
+    document.getElementById("btn-report-view-cards")?.addEventListener("click", () => window.setReportViewMode("cards"));
 
     // Departments Modal Events
     document.getElementById("btn-open-departments-modal")?.addEventListener("click", () => {

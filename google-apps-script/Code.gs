@@ -420,6 +420,7 @@ function handleSubmitLeave(ss, payload) {
   ];
 
   sheet.appendRow(newRow);
+  SpreadsheetApp.flush();
 
   return {
     success: true,
