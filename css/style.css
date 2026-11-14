@@ -88,13 +88,15 @@ body {
   body {
     background-color: #ffffff !important;
     color: #000000 !important;
-    font-size: 12pt;
+    font-size: 11pt;
   }
   
   /* ซ่อนส่วนที่ไม่เกี่ยวข้องกับการพิมพ์ เช่น Sidebar, Header, Nav, Buttons */
   .no-print,
   #sidebar,
   #header-bar,
+  #bottom-nav-bar,
+  #sidebar-backdrop,
   .action-buttons,
   .swal2-container,
   #toast-container {
@@ -104,6 +106,59 @@ body {
   main {
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+  }
+
+  /* บังคับให้ตารางแสดงผลเสมอในโหมดพิมพ์ แม้ในจอมือถือจะถูกสลับเป็นการ์ด */
+  #report-table-container,
+  #history-table-container {
+    display: block !important;
+  }
+  #report-cards-container,
+  #history-cards-container {
+    display: none !important;
+  }
+
+  /* ปรับแต่งหน้าต่างพิมพ์รายงาน (Print Modal) ให้พิมพ์แบบเต็มหน้ากระดาษทางการ */
+  body.printing-report-modal main,
+  body.printing-slip-modal main {
+    display: none !important;
+  }
+
+  body.printing-report-modal #modal-printable-report,
+  body.printing-slip-modal #modal-printable-slip {
+    position: static !important;
+    display: block !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  body.printing-report-modal #modal-printable-report > div,
+  body.printing-slip-modal #modal-printable-slip > div {
+    position: static !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  #printable-report-sheet,
+  #printable-slip-content {
+    padding: 0 !important;
+    margin: 0 !important;
     width: 100% !important;
   }
 
@@ -127,8 +182,8 @@ body {
   }
 
   th, td {
-    border: 1px solid #e5e7eb !important;
-    padding: 8px 12px !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 10px !important;
   }
 }
 

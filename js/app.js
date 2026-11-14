@@ -1965,9 +1965,474 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
     }
 
+    // ตรวจจับเบราว์เซอร์ LINE สำหรับแจ้งเตือนการสั่งพิมพ์
+    const isLine = /Line|FBAN|FBAV|Instagram/i.test(navigator.userAgent);
+    const slipLineAlert = document.getElementById("line-browser-slip-alert");
+    if (slipLineAlert) {
+      if (isLine) {
+        slipLineAlert.classList.remove("hidden");
+      } else {
+        slipLineAlert.classList.add("hidden");
+      }
+    }
+
     document.getElementById("modal-printable-slip").classList.remove("hidden");
     initLucide();
   }
+
+  /**
+   * เปิดหน้าต่างพิมพ์รายงานสรุปประวัติการลาอย่างเป็นทางการ (Official Printable Report Modal)
+   * รองรับทั้งการแสดงตัวอย่างบนจอมือถือ, การสั่งพิมพ์ AirPrint / Print,
+   * และการดาวน์โหลดรายงานเป็นไฟล์ HTML / PDF สำหรับเปิดใน Safari หรือส่งต่อ
+   */
+  function openPrintableReportModal() {
+    const startDate = document.getElementById("report-filter-start")?.value || "";
+    const endDate = document.getElementById("report-filter-end")?.value || "";
+    const empId = document.getElementById("report-filter-emp")?.value || "";
+    const leaveType = document.getElementById("report-filter-type")?.value || "";
+
+    let filtered = [...state.leaveRequests];
+    if (startDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.start_date) >= startDate);
+    if (endDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.end_date) <= endDate);
+    if (empId) filtered = filtered.filter(r => String(r.emp_id).trim() === String(empId).trim());
+    if (leaveType) filtered = filtered.filter(r => r.leave_type === leaveType);
+
+    const selectedEmp = empId ? state.employees.find(e => String(e.emp_id).trim() === String(empId).trim()) : null;
+    const now = new Date();
+    const nowDateThai = now.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+    const nowTime = now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+
+    let periodLabel = "ประวัติทั้งหมด";
+    if (startDate && endDate) {
+      periodLabel = `${LeaveAPI.formatDateDMY(startDate)} ถึง ${LeaveAPI.formatDateDMY(endDate)}`;
+    } else if (startDate) {
+      periodLabel = `ตั้งแต่วันที่ ${LeaveAPI.formatDateDMY(startDate)}`;
+    } else if (endDate) {
+      periodLabel = `ถึงวันที่ ${LeaveAPI.formatDateDMY(endDate)}`;
+    }
+
+    let filterScopeLabel = "พนักงานทุกคนในระบบ";
+    if (selectedEmp) {
+      filterScopeLabel = `${selectedEmp.name} (รหัส: ${selectedEmp.emp_id} • แผนก: ${selectedEmp.department})`;
+    }
+
+    let typeScopeLabel = "ทุกประเภทการลา";
+    if (leaveType && CONFIG.LEAVE_TYPES[leaveType]) {
+      typeScopeLabel = CONFIG.LEAVE_TYPES[leaveType].name;
+    }
+
+    // สรุปยอดโควตาวันลาเมื่อเลือกพนักงานเฉพาะราย
+    let quotaHtml = "";
+    if (selectedEmp) {
+      const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests);
+      quotaHtml = `
+        <div class="border border-slate-300 rounded-lg p-3 bg-slate-50/80 text-xs">
+          <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-200">
+            <span class="font-bold text-slate-800">📊 สรุปสิทธิ์วันลาคงเหลือของพนักงาน (ณ วันที่พิมพ์):</span>
+            <span class="font-mono text-[11px] text-slate-500">${escapeHtml(selectedEmp.emp_id)} - ${escapeHtml(selectedEmp.name)}</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div class="bg-white p-2 rounded border border-blue-200">
+              <span class="block text-[11px] text-blue-800 font-semibold">ลาพักร้อน</span>
+              <span class="font-mono font-bold text-slate-900">${balances.annual.used} / ${balances.annual.quota} วัน</span>
+              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.annual.remaining} วัน</span>
+            </div>
+            <div class="bg-white p-2 rounded border border-purple-200">
+              <span class="block text-[11px] text-purple-800 font-semibold">ลากิจ</span>
+              <span class="font-mono font-bold text-slate-900">${balances.personal.used} / ${balances.personal.quota} วัน</span>
+              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.personal.remaining} วัน</span>
+            </div>
+            <div class="bg-white p-2 rounded border border-rose-200">
+              <span class="block text-[11px] text-rose-800 font-semibold">ลาป่วย</span>
+              <span class="font-mono font-bold text-slate-900">${balances.sick.used} / ${balances.sick.quota} วัน</span>
+              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.sick.remaining} วัน</span>
+            </div>
+            <div class="bg-white p-2 rounded border border-amber-200">
+              <span class="block text-[11px] text-amber-800 font-semibold">ลาอื่นๆ</span>
+              <span class="font-mono font-bold text-slate-900">${balances.other.used} / ${balances.other.quota} วัน</span>
+              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.other.remaining} วัน</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const totalDays = filtered.reduce((acc, curr) => acc + Number(curr.total_days || 0), 0);
+
+    let rowsHtml = "";
+    if (filtered.length === 0) {
+      rowsHtml = `<tr><td colspan="9" class="p-6 text-center text-slate-400 italic">ไม่พบประวัติการลาตามเงื่อนไขที่เลือก</td></tr>`;
+    } else {
+      rowsHtml = filtered.map((req, index) => {
+        const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
+        const startDMY = LeaveAPI.formatDateDMY(req.start_date);
+        const endDMY = LeaveAPI.formatDateDMY(req.end_date);
+        let durationText = `${startDMY} - ${endDMY}`;
+        if (req.leave_duration_type === "hourly") {
+          durationText = `${startDMY} (${req.leave_hours || ""} ชม.)`;
+        } else if (req.leave_duration_type === "morning") {
+          durationText = `${startDMY} (ครึ่งวันเช้า)`;
+        } else if (req.leave_duration_type === "afternoon") {
+          durationText = `${startDMY} (ครึ่งวันบ่าย)`;
+        }
+
+        return `
+          <tr class="border-b border-slate-300">
+            <td class="p-2 border border-slate-300 text-center font-mono">${index + 1}</td>
+            <td class="p-2 border border-slate-300 font-mono text-center font-semibold">${escapeHtml(req.emp_id)}</td>
+            <td class="p-2 border border-slate-300 font-medium text-slate-900">${escapeHtml(req.emp_name)}</td>
+            <td class="p-2 border border-slate-300 text-slate-700">${escapeHtml(req.department)}</td>
+            <td class="p-2 border border-slate-300 text-center font-semibold text-slate-800">${typeInfo.name.split(" ")[0]}</td>
+            <td class="p-2 border border-slate-300 text-center font-mono text-[11px]">${durationText}</td>
+            <td class="p-2 border border-slate-300 text-center font-bold text-blue-900">${req.total_days}</td>
+            <td class="p-2 border border-slate-300 text-slate-600 text-[11px]">${escapeHtml(req.reason || "-")}</td>
+            <td class="p-2 border border-slate-300 text-center font-semibold text-emerald-700 text-[11px]">บันทึกแล้ว</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    const sheetContainer = document.getElementById("printable-report-sheet");
+    if (sheetContainer) {
+      sheetContainer.innerHTML = `
+        <div class="border-2 border-slate-900 p-5 sm:p-7 rounded-xl space-y-5 bg-white text-slate-900">
+          <!-- Document Header -->
+          <div class="text-center border-b-2 border-slate-900 pb-4">
+            <h1 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">รายงานสรุปประวัติการลางานของพนักงาน</h1>
+            <p class="text-xs text-slate-600 mt-1">LEAVE HISTORY &amp; ATTENDANCE SUMMARY REPORT • บริษัท เจริญอุตสาหกรรม จำกัด (มหาชน)</p>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-600 mt-4 pt-2.5 border-t border-slate-200 text-left">
+              <div><b>วันที่พิมพ์รายงาน:</b> ${nowDateThai} (${nowTime} น.)</div>
+              <div><b>ช่วงเวลา:</b> ${periodLabel}</div>
+              <div><b>ประเภทการลา:</b> ${typeScopeLabel}</div>
+              <div class="sm:col-span-3"><b>ขอบเขตข้อมูล:</b> ${filterScopeLabel}</div>
+            </div>
+          </div>
+
+          <!-- Employee Quota Breakdown (if employee selected) -->
+          ${quotaHtml}
+
+          <!-- Official Table -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs border-collapse border border-slate-400">
+              <thead class="bg-slate-100 font-bold border-b-2 border-slate-400 text-slate-900">
+                <tr>
+                  <th class="p-2 border border-slate-400 text-center w-10">ลำดับ</th>
+                  <th class="p-2 border border-slate-400 text-center w-20">รหัส</th>
+                  <th class="p-2 border border-slate-400 text-left">ชื่อ - นามสกุล</th>
+                  <th class="p-2 border border-slate-400 text-left">แผนก</th>
+                  <th class="p-2 border border-slate-400 text-center">ประเภทลา</th>
+                  <th class="p-2 border border-slate-400 text-center">ช่วงวันที่ลา</th>
+                  <th class="p-2 border border-slate-400 text-center w-16">วันทำการ</th>
+                  <th class="p-2 border border-slate-400 text-left">เหตุผลความจำเป็น</th>
+                  <th class="p-2 border border-slate-400 text-center w-16">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+              <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
+                <tr>
+                  <td colspan="6" class="p-2.5 border border-slate-400 text-right">รวมจำนวนวันลาสุทธิทั้งหมด:</td>
+                  <td class="p-2.5 border border-slate-400 text-center text-blue-900 text-sm font-black">${totalDays} วัน</td>
+                  <td colspan="2" class="p-2.5 border border-slate-400 text-slate-600 font-semibold">(${filtered.length} รายการ)</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <!-- Signatures Footer -->
+          <div class="grid grid-cols-3 gap-4 pt-6 text-center text-xs">
+            <div class="space-y-12">
+              <div class="h-10 border-b border-slate-400"></div>
+              <div>
+                <p class="font-semibold text-slate-900">(ลงชื่อผู้จัดทำรายงาน)</p>
+                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
+              </div>
+            </div>
+
+            <div class="space-y-12">
+              <div class="h-10 border-b border-slate-400"></div>
+              <div>
+                <p class="font-semibold text-slate-900">(ลงชื่อหัวหน้างาน / ผู้ตรวจสอบ)</p>
+                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
+              </div>
+            </div>
+
+            <div class="space-y-12">
+              <div class="h-10 border-b border-slate-400"></div>
+              <div>
+                <p class="font-semibold text-slate-900">(ลงชื่อผู้อนุมัติฝ่ายบุคคล HR)</p>
+                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ตรวจจับ LINE In-App Browser
+    const isLine = /Line|FBAN|FBAV|Instagram/i.test(navigator.userAgent);
+    const lineAlert = document.getElementById("line-browser-report-alert");
+    if (lineAlert) {
+      if (isLine) {
+        lineAlert.classList.remove("hidden");
+      } else {
+        lineAlert.classList.add("hidden");
+      }
+    }
+
+    document.getElementById("modal-printable-report")?.classList.remove("hidden");
+    initLucide();
+  }
+
+  window.openPrintableReportModal = openPrintableReportModal;
+
+  window.triggerPrintReport = function() {
+    document.body.classList.add("printing-report-modal");
+    try {
+      window.print();
+    } catch (err) {
+      console.warn("Print error:", err);
+    }
+    setTimeout(() => {
+      document.body.classList.remove("printing-report-modal");
+    }, 1000);
+  };
+
+  window.triggerPrintSlip = function() {
+    document.body.classList.add("printing-slip-modal");
+    try {
+      window.print();
+    } catch (err) {
+      console.warn("Print error:", err);
+    }
+    setTimeout(() => {
+      document.body.classList.remove("printing-slip-modal");
+    }, 1000);
+  };
+
+  window.addEventListener("afterprint", () => {
+    document.body.classList.remove("printing-report-modal", "printing-slip-modal");
+  });
+
+  window.downloadReportAsHtml = function() {
+    const sheet = document.getElementById("printable-report-sheet");
+    if (!sheet) return;
+
+    const sheetContent = sheet.innerHTML;
+    const today = new Date().toISOString().slice(0, 10);
+    const empId = document.getElementById("report-filter-emp")?.value || "";
+
+    const fullHtml = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>รายงานสรุปประวัติการลางาน_${today}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Prompt', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f8fafc;
+      color: #0f172a;
+      font-size: 12px;
+    }
+    .page-container {
+      max-width: 960px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+    }
+    th, td {
+      border: 1px solid #94a3b8;
+      padding: 7px 10px;
+      text-align: left;
+    }
+    th {
+      background-color: #f1f5f9;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .font-bold { font-weight: 700; }
+    .font-mono { font-family: monospace; }
+    .btn-topbar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .btn-action {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .page-container { box-shadow: none; padding: 0; max-width: 100%; }
+      .btn-topbar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="btn-topbar">
+    <button class="btn-action" onclick="window.print()">🖨️ สั่งพิมพ์เอกสาร (AirPrint / Save as PDF)</button>
+  </div>
+  <div class="page-container">
+    ${sheetContent}
+  </div>
+  <script>
+    window.addEventListener("load", function() {
+      setTimeout(function() {
+        try { window.print(); } catch(e) {}
+      }, 500);
+    });
+  <\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Leave_Report_${empId ? empId + "_" : ""}${today}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    Swal.fire({
+      icon: "success",
+      title: "ดาวน์โหลดเอกสารเรียบร้อย!",
+      html: `
+        <div class="text-left text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5 text-slate-700">
+          <p class="font-bold text-blue-700">📲 คำแนะนำสำหรับมือถือ (iPhone/Android):</p>
+          <p>1. แตะเปิดไฟล์ HTML ที่ดาวน์โหลดใน <b>Safari หรือ Chrome</b></p>
+          <p>2. ระบบจะเปิดหน้าสั่งพิมพ์ (AirPrint) ให้อัตโนมัติทันที</p>
+          <p>3. คุณสามารถเลือก <b>แชร์ > บันทึกเป็น PDF</b> ใน Safari เพื่อบันทึกเป็นไฟล์ PDF ได้เลยครับ</p>
+        </div>
+      `,
+      confirmButtonText: "ตกลง"
+    });
+  };
+
+  window.downloadSlipAsHtml = function() {
+    const sheet = document.getElementById("printable-slip-content");
+    if (!sheet) return;
+
+    const sheetContent = sheet.innerHTML;
+    const reqId = document.getElementById("slip-req-id")?.textContent || "Slip";
+
+    const fullHtml = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ใบคำขอลางาน_${reqId}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Prompt', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f8fafc;
+      color: #0f172a;
+      font-size: 12px;
+    }
+    .page-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+    }
+    th, td {
+      border: 1px solid #94a3b8;
+      padding: 7px 10px;
+      text-align: left;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .font-bold { font-weight: 700; }
+    .font-mono { font-family: monospace; }
+    .btn-topbar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .btn-action {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .page-container { box-shadow: none; padding: 0; max-width: 100%; }
+      .btn-topbar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="btn-topbar">
+    <button class="btn-action" onclick="window.print()">🖨️ สั่งพิมพ์เอกสารนี้ (AirPrint / Save as PDF)</button>
+  </div>
+  <div class="page-container">
+    ${sheetContent}
+  </div>
+  <script>
+    window.addEventListener("load", function() {
+      setTimeout(function() {
+        try { window.print(); } catch(e) {}
+      }, 500);
+    });
+  <\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Leave_Slip_${reqId}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   function getStatusBadge(status) {
     if (status === "Cancelled") {
@@ -2655,7 +3120,9 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("report-filter-emp")?.addEventListener("change", () => renderReports());
     document.getElementById("report-filter-type")?.addEventListener("change", () => renderReports());
     document.getElementById("btn-export-excel")?.addEventListener("click", () => exportToExcel());
-    document.getElementById("btn-print-report")?.addEventListener("click", () => window.print());
+    document.getElementById("btn-print-report")?.addEventListener("click", () => openPrintableReportModal());
+    document.getElementById("btn-modal-print-report-now")?.addEventListener("click", () => window.triggerPrintReport());
+    document.getElementById("btn-modal-download-report-html")?.addEventListener("click", () => window.downloadReportAsHtml());
 
     // Settings: Save GAS URL
     document.getElementById("btn-save-gas-url")?.addEventListener("click", async () => {
@@ -2814,12 +3281,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // Close Modals
     document.querySelectorAll(".btn-close-modal").forEach(btn => {
       btn.addEventListener("click", () => {
-        document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments, #modal-edit-leave").forEach(m => m.classList.add("hidden"));
+        document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-printable-report, #modal-departments, #modal-edit-leave").forEach(m => m.classList.add("hidden"));
       });
     });
 
     // Tap backdrop to close modals (Mobile & Desktop convenience)
-    document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments, #modal-edit-leave").forEach(modal => {
+    document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-printable-report, #modal-departments, #modal-edit-leave").forEach(modal => {
       modal.addEventListener("click", (e) => {
         if (e.target === modal) {
           modal.classList.add("hidden");
