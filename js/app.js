@@ -1597,19 +1597,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const tbody = document.getElementById("holidays-table-body");
     if (!tbody) return;
 
-    if (state.holidays.length === 0) {
+    // กรองและ Normalize ข้อมูลวันหยุดให้สะอาดและถูกต้องเสมอ
+    const validHolidays = (state.holidays || [])
+      .map(h => LeaveAPI.normalizeHoliday(h))
+      .filter(h => h && h.holiday_date);
+
+    if (validHolidays.length === 0) {
       tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-400">ยังไม่มีข้อมูลวันหยุดนักขัตฤกษ์ในระบบ กรุณากดปุ่ม "โหลดวันหยุดไทย" หรือ "เพิ่มวันหยุดเอง"</td></tr>`;
       return;
     }
 
-    const sorted = [...state.holidays].sort((a, b) => {
-      const dateA = LeaveAPI.formatDateISO(a.holiday_date);
-      const dateB = LeaveAPI.formatDateISO(b.holiday_date);
+    const sorted = [...validHolidays].sort((a, b) => {
+      const dateA = a.holiday_date;
+      const dateB = b.holiday_date;
       return dateA.localeCompare(dateB);
     });
 
     tbody.innerHTML = sorted.map(h => {
-      const cleanISO = LeaveAPI.formatDateISO(h.holiday_date);
+      const cleanISO = h.holiday_date;
       const dmy = LeaveAPI.formatDateDMY(cleanISO);
       
       let thaiLabel = "";
@@ -1623,6 +1628,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const safeId = escapeHtml(String(h.id || ""));
       const safeDate = escapeHtml(String(cleanISO));
       const safeName = escapeHtml(String(h.name || ""));
+      const displayYear = h.year || cleanISO.slice(0, 4);
+      const thYear = displayYear ? (parseInt(displayYear) + 543) : "";
 
       return `
         <tr class="hover:bg-slate-50 transition-colors">
@@ -1631,7 +1638,9 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="text-slate-400 text-xs block">${thaiLabel}</span>
           </td>
           <td class="py-3 px-4 font-semibold text-slate-800">${safeName}</td>
-          <td class="py-3 px-4 text-center font-mono text-slate-500">${h.year || cleanISO.slice(0, 4)}</td>
+          <td class="py-3 px-4 text-center font-mono text-slate-500">
+            ${displayYear} ${thYear ? `<span class="text-xs text-slate-400 font-sans">(พ.ศ. ${thYear})</span>` : ""}
+          </td>
           <td class="py-3 px-4 text-right">
             <button onclick="window.confirmDeleteHoliday('${safeId}', '${safeDate}', '${safeName}')" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ml-auto">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>

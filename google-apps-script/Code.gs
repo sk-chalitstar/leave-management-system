@@ -303,24 +303,55 @@ function getLeaveRequestsData(ss) {
  */
 function getHolidaysData(ss) {
   const sheet = ss.getSheetByName("Holidays");
+  if (!sheet) return [];
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
 
-  const headers = data[0];
+  const headers = data[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
+
+  let colId = 0;
+  let colDate = 1;
+  let colName = 2;
+  let colYear = 3;
+
+  for (let c = 0; c < headers.length; c++) {
+    const h = headers[c];
+    if (h === "id" || h === "รหัส") colId = c;
+    else if (h.indexOf("date") > -1 || h.indexOf("วัน") > -1) colDate = c;
+    else if (h.indexOf("name") > -1 || h.indexOf("ชื่อ") > -1) colName = c;
+    else if (h.indexOf("year") > -1 || h.indexOf("ปี") > -1) colYear = c;
+  }
+
   const list = [];
   for (let i = 1; i < data.length; i++) {
     let row = data[i];
-    let obj = {};
-    for (let j = 0; j < headers.length; j++) {
-      let val = row[j];
-      if (val instanceof Date) {
-        val = Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
-      } else if (typeof val === "string" && val.indexOf("T") > -1) {
-        val = val.split("T")[0];
-      }
-      obj[headers[j]] = val;
+    if (!row || row.length === 0) continue;
+
+    let idVal = row[colId];
+    let dateVal = row[colDate];
+    let nameVal = row[colName];
+    let yearVal = row[colYear];
+
+    if (!idVal && !dateVal && !nameVal) continue;
+
+    if (dateVal instanceof Date) {
+      dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } else if (typeof dateVal === "string" && dateVal.indexOf("T") > -1) {
+      dateVal = dateVal.split("T")[0];
+    } else if (dateVal) {
+      dateVal = String(dateVal).trim();
     }
-    list.push(obj);
+
+    if (!yearVal && dateVal && String(dateVal).length >= 4) {
+      yearVal = String(dateVal).substring(0, 4);
+    }
+
+    list.push({
+      id: String(idVal || ("H-" + i)),
+      holiday_date: String(dateVal || ""),
+      name: String(nameVal || ""),
+      year: yearVal ? String(yearVal) : ""
+    });
   }
   return list;
 }
@@ -755,29 +786,43 @@ function handleCleanDuplicateHolidays(ss) {
 }
 
 /**
- * ซิงค์ชุดวันหยุดมาตรฐานประจำปี (ลบของปีนั้นก่อนเพื่อป้องกันการซ้ำซ้อน)
+ * ซิงค์ชุดวันหยุดมาตรฐานประจำปี (ลบของปีนั้นก่อนเพื่อป้องกันการซ้ำซ้อน และเซ็ตหัวตารางมาตรฐาน)
  */
 function handleSyncDefaultHolidays(ss, payload) {
-  const sheet = ss.getSheetByName("Holidays");
+  let sheet = ss.getSheetByName("Holidays");
+  if (!sheet) {
+    sheet = ss.insertSheet("Holidays");
+  }
+
+  // เซ็ตหัวตารางคอลัมน์ A-D ให้ถูกต้องเสมอ
+  sheet.getRange(1, 1, 1, 4).setValues([["id", "holiday_date", "name", "year"]]).setFontWeight("bold").setBackground("#EEF2F6");
+
   const year = Number(payload.year || new Date().getFullYear());
   const holidays = payload.holidays || [];
 
-  // ลบวันหยุดของปีนั้นออกก่อน
-  const data = sheet.getDataRange().getValues();
-  for (let i = data.length - 1; i >= 1; i--) {
-    if (Number(data[i][3]) === year) {
-      sheet.deleteRow(i + 1);
-    }
+  // ล้างข้อมูลวันหยุดเดิมในชีตตั้งแต่แถว 2 ลงไป
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.deleteRows(2, lastRow - 1);
   }
 
-  for (let h of holidays) {
-    sheet.appendRow([
-      "H-" + year + "-" + Utilities.getUuid().substring(0, 5),
+  // เขียนข้อมูลวันหยุดใหม่ทั้งหมดลงชีต
+  const rows = [];
+  for (let i = 0; i < holidays.length; i++) {
+    const h = holidays[i];
+    const holId = h.id || ("H-" + year + "-" + String(i + 1).padStart(2, "0"));
+    rows.push([
+      holId,
       h.holiday_date,
       h.name,
       year
     ]);
   }
 
-  return { success: true, message: `ซิงค์วันหยุดประจำปี ${year} สำเร็จ` };
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 4).setValues(rows);
+  }
+
+  SpreadsheetApp.flush();
+  return { success: true, message: `ซิงค์วันหยุดประจำปี ${year} สำเร็จ (${rows.length} วัน)` };
 }

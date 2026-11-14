@@ -202,12 +202,28 @@ class LeaveAPI {
           // ซิงค์แคชลง LocalStorage เพื่อให้เปิดดูแบบออฟไลน์ได้
           localStorage.setItem(CONFIG.STORAGE_KEYS.EMPLOYEES, JSON.stringify(normalizedEmployees));
           this.safeSetLeaves(fetchedLeaves);
-          if (data.holidays) localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(data.holidays));
+
+          // ประมวลผลและ Normalize วันหยุดที่ได้จาก Google Sheets
+          const rawHolidays = data.holidays || [];
+          let normalizedHolidays = rawHolidays.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+
+          // กรณีที่ Google Sheets ส่งกลับมาเป็นโครงสร้างว่าง (เช่น Header ไม่ตรง) ให้ดึงจาก Default หรือ Cache
+          if (normalizedHolidays.length === 0 && rawHolidays.length > 0) {
+            const currentYear = new Date().getFullYear();
+            normalizedHolidays = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(currentYear);
+          } else if (normalizedHolidays.length === 0) {
+            const cachedHols = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+            normalizedHolidays = cachedHols.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+          }
+
+          if (normalizedHolidays.length > 0) {
+            localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(normalizedHolidays));
+          }
 
           return {
             employees: normalizedEmployees,
             leaveRequests: fetchedLeaves,
-            holidays: data.holidays || [],
+            holidays: normalizedHolidays,
             source: "live"
           };
         }
@@ -243,10 +259,13 @@ class LeaveAPI {
       return norm;
     });
 
+    const rawLocalHols = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    const normalizedLocalHols = rawLocalHols.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+
     return {
       employees: normalizedLocalEmps,
       leaveRequests: localLeaves,
-      holidays: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]"),
+      holidays: normalizedLocalHols,
       source: "local"
     };
   }
@@ -789,6 +808,16 @@ class LeaveAPI {
    */
   async syncDefaultHolidays(year) {
     const list = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(year);
+
+    // บันทึกลง LocalStorage เสมอ เพื่อให้หน้าจอแสดงผลได้ถูกต้องและรวดเร็วทันที
+    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    holidays = holidays.filter(h => {
+      const norm = LeaveAPI.normalizeHoliday(h);
+      return norm && Number(norm.year) !== Number(year);
+    });
+    holidays = holidays.concat(list);
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -800,16 +829,12 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        return result || { success: true, message: `โหลดวันหยุดปี ${year} สำเร็จ (${list.length} วัน)` };
       } catch (err) {
         console.warn("GAS sync holidays error:", err);
       }
     }
 
-    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    holidays = holidays.filter(h => Number(h.year) !== Number(year));
-    holidays = holidays.concat(list);
-    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
     return { success: true, message: `โหลดวันหยุดปี ${year} สำเร็จ (${list.length} วัน)` };
   }
 
@@ -829,7 +854,10 @@ class LeaveAPI {
     if (start > end) return 0;
 
     const holidaySet = new Set(
-      holidayList.map(h => LeaveAPI.formatDateISO(h.holiday_date))
+      holidayList.map(h => {
+        const norm = LeaveAPI.normalizeHoliday(h);
+        return norm ? norm.holiday_date : LeaveAPI.formatDateISO(h.holiday_date);
+      }).filter(Boolean)
     );
 
     // ดึงเวรหยุดประจำตัวของพนักงาน (0=อาทิตย์, 1=จันทร์, ..., 6=เสาร์)
@@ -941,6 +969,80 @@ class LeaveAPI {
         used: used.other,
         remaining: Math.max(0, Math.round((quotas.other - used.other) * 100) / 100)
       }
+    };
+  }
+
+  /**
+   * Helper: แปลงและตรวจสอบโครงสร้างข้อมูลวันหยุด (Normalize Holiday Object)
+   * รองรับทุกรูปแบบชื่อคีย์ทั้งภาษาไทย ภาษาอังกฤษ มีช่องว่าง หรือส่งมาเป็น Array
+   */
+  static normalizeHoliday(h) {
+    if (!h) return null;
+
+    if (Array.isArray(h)) {
+      const cleanISO = LeaveAPI.formatDateISO(h[1]);
+      return {
+        id: String(h[0] || (cleanISO ? `H-${cleanISO}` : "")),
+        holiday_date: cleanISO,
+        name: String(h[2] || "").trim(),
+        year: String(h[3] || (cleanISO ? cleanISO.slice(0, 4) : ""))
+      };
+    }
+
+    let idVal = h.id || h.ID || h["รหัส"] || "";
+    let dateVal = h.holiday_date || h.date || h.holidayDate || h.Date || h.Holiday_Date || h["วันที่"] || h["วันที่วันหยุด"] || h["วันหยุด"] || "";
+    let nameVal = h.name || h.holiday_name || h.holidayName || h.Name || h.Holiday_Name || h["ชื่อ"] || h["ชื่อวันหยุด"] || h["วันหยุดนักขัตฤกษ์"] || "";
+    let yearVal = h.year || h.Year || h["ปี"] || h["ปี พ.ศ./ค.ศ."] || "";
+
+    // ค้นหาจาก Keys ทั้งหมดแบบไม่สนตัวพิมพ์เล็กใหญ่และช่องว่าง
+    const keys = Object.keys(h);
+    for (let k of keys) {
+      const cleanK = k.trim().toLowerCase();
+      const val = h[k];
+      if (!idVal && (cleanK === "id" || cleanK === "รหัส")) idVal = val;
+      if (!dateVal && (cleanK.includes("holiday_date") || cleanK.includes("date") || cleanK.includes("วัน"))) dateVal = val;
+      if (!nameVal && (cleanK.includes("name") || cleanK.includes("ชื่อ") || cleanK.includes("เทศกาล"))) nameVal = val;
+      if (!yearVal && (cleanK.includes("year") || cleanK.includes("ปี"))) yearVal = val;
+    }
+
+    // Fallback: ค้นหาจากค่าใน values
+    const vals = Object.values(h);
+    if (!dateVal) {
+      for (let v of vals) {
+        const iso = LeaveAPI.formatDateISO(v);
+        if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+          dateVal = iso;
+          break;
+        }
+      }
+    }
+    if (!nameVal) {
+      for (let v of vals) {
+        if (typeof v === "string" && v.length > 1 && !v.startsWith("H-") && !v.includes("-") && isNaN(Number(v))) {
+          nameVal = v;
+          break;
+        }
+      }
+    }
+    if (!idVal) {
+      for (let v of vals) {
+        if (typeof v === "string" && v.startsWith("H-")) {
+          idVal = v;
+          break;
+        }
+      }
+    }
+
+    const cleanISO = LeaveAPI.formatDateISO(dateVal);
+    if (!yearVal && cleanISO) {
+      yearVal = cleanISO.slice(0, 4);
+    }
+
+    return {
+      id: String(idVal || (cleanISO ? `H-${cleanISO}` : "H-" + Math.random().toString(36).substring(2, 7))),
+      holiday_date: cleanISO,
+      name: String(nameVal || "").trim(),
+      year: String(yearVal || (cleanISO ? cleanISO.slice(0, 4) : new Date().getFullYear()))
     };
   }
 
