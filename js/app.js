@@ -1971,6 +1971,10 @@ document.addEventListener("DOMContentLoaded", () => {
   function openPrintableLeaveSlip(req) {
     if (!req) return;
 
+    // ซ่อน modal รายละเอียดคำขอลา เพื่อไม่ให้แสดงซ้อนอยู่เบื้องหลังหรือหลุดไปหน้าพิมพ์
+    document.getElementById("modal-leave-detail")?.classList.add("hidden");
+    document.getElementById("modal-printable-report")?.classList.add("hidden");
+
     const emp = state.employees.find(e => String(e.emp_id).trim() === String(req.emp_id).trim());
     const balances = emp ? window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests) : null;
     const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
@@ -2037,6 +2041,10 @@ document.addEventListener("DOMContentLoaded", () => {
    * และการดาวน์โหลดรายงานเป็นไฟล์ HTML / PDF สำหรับเปิดใน Safari หรือส่งต่อ
    */
   function openPrintableReportModal() {
+    // ซ่อน modal อื่นๆ เพื่อป้องกันการแสดงผลซ้อนในหน้าพิมพ์
+    document.getElementById("modal-leave-detail")?.classList.add("hidden");
+    document.getElementById("modal-printable-slip")?.classList.add("hidden");
+
     const selectedYear = document.getElementById("report-filter-year")?.value || "";
     const startDate = document.getElementById("report-filter-start")?.value || "";
     const endDate = document.getElementById("report-filter-end")?.value || "";
@@ -2258,6 +2266,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.triggerPrintReport = function() {
     document.body.classList.add("printing-report-modal");
+    document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-slip, #modal-departments, #modal-edit-leave").forEach(m => m.classList.add("hidden"));
     try {
       window.print();
     } catch (err) {
@@ -2270,6 +2279,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.triggerPrintSlip = function() {
     document.body.classList.add("printing-slip-modal");
+    document.querySelectorAll("#modal-leave-detail, #modal-employee, #modal-holiday, #modal-printable-report, #modal-departments, #modal-edit-leave").forEach(m => m.classList.add("hidden"));
     try {
       window.print();
     } catch (err) {

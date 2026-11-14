@@ -91,7 +91,7 @@ body {
     font-size: 11pt;
   }
   
-  /* ซ่อนส่วนที่ไม่เกี่ยวข้องกับการพิมพ์ เช่น Sidebar, Header, Nav, Buttons */
+  /* ซ่อนส่วนที่ไม่เกี่ยวข้องกับการพิมพ์ เช่น Sidebar, Header, Nav, Buttons และ Modal ต่างๆ */
   .no-print,
   #sidebar,
   #header-bar,
@@ -99,7 +99,12 @@ body {
   #sidebar-backdrop,
   .action-buttons,
   .swal2-container,
-  #toast-container {
+  #toast-container,
+  #modal-leave-detail,
+  #modal-employee,
+  #modal-holiday,
+  #modal-departments,
+  #modal-edit-leave {
     display: none !important;
   }
 
@@ -119,14 +124,29 @@ body {
     display: none !important;
   }
 
-  /* ปรับแต่งหน้าต่างพิมพ์รายงาน (Print Modal) ให้พิมพ์แบบเต็มหน้ากระดาษทางการ */
+  /* ปรับแต่งหน้าต่างพิมพ์ใบลา (Print Slip Modal) และพิมพ์รายงาน (Print Report Modal) */
+  body.printing-slip-modal main,
+  body.printing-slip-modal #modal-leave-detail,
+  body.printing-slip-modal #modal-printable-report,
+  body:has(#modal-printable-slip:not(.hidden)) main,
+  body:has(#modal-printable-slip:not(.hidden)) #modal-leave-detail,
+  body:has(#modal-printable-slip:not(.hidden)) #modal-printable-report {
+    display: none !important;
+  }
+
   body.printing-report-modal main,
-  body.printing-slip-modal main {
+  body.printing-report-modal #modal-leave-detail,
+  body.printing-report-modal #modal-printable-slip,
+  body:has(#modal-printable-report:not(.hidden)) main,
+  body:has(#modal-printable-report:not(.hidden)) #modal-leave-detail,
+  body:has(#modal-printable-report:not(.hidden)) #modal-printable-slip {
     display: none !important;
   }
 
   body.printing-report-modal #modal-printable-report,
-  body.printing-slip-modal #modal-printable-slip {
+  body.printing-slip-modal #modal-printable-slip,
+  #modal-printable-slip:not(.hidden),
+  #modal-printable-report:not(.hidden) {
     position: static !important;
     display: block !important;
     background: transparent !important;
@@ -142,7 +162,9 @@ body {
   }
 
   body.printing-report-modal #modal-printable-report > div,
-  body.printing-slip-modal #modal-printable-slip > div {
+  body.printing-slip-modal #modal-printable-slip > div,
+  #modal-printable-slip:not(.hidden) > div,
+  #modal-printable-report:not(.hidden) > div {
     position: static !important;
     max-width: 100% !important;
     width: 100% !important;
