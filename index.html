@@ -715,7 +715,16 @@
             </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-600"></i>
+                <span>เลือกปีรายงาน</span>
+              </label>
+              <select id="report-filter-year" class="w-full text-xs rounded-lg border-slate-300 p-2 border bg-white font-medium text-slate-800">
+                <option value="">-- ทุกปี (All Years) --</option>
+              </select>
+            </div>
             <div>
               <label class="block text-[11px] font-semibold text-slate-600 mb-1">วันที่เริ่มต้น</label>
               <input type="text" id="report-filter-start" placeholder="จากวันที่" class="w-full text-xs rounded-lg border-slate-300 p-2 border bg-white">
@@ -1214,39 +1223,35 @@
           </table>
 
           <!-- Leave Balance Status for This Employee -->
-          <div class="border border-slate-300 p-3 rounded bg-slate-50 text-xs">
-            <span class="font-bold text-slate-800 block mb-1">สรุปวันลาคงเหลือของพนักงาน (ณ วันที่พิมพ์):</span>
-            <div class="grid grid-cols-4 gap-2 text-center" id="slip-leave-balances">
-              <!-- Inserted dynamically -->
+          <div class="border border-slate-300 p-3 rounded-lg bg-slate-50 text-xs" style="border: 1px solid #cbd5e1; background: #f8fafc; padding: 10px; border-radius: 8px;">
+            <span class="font-bold text-slate-800 block mb-1" style="display: block; font-weight: 700; color: #1e293b; margin-bottom: 6px;">สรุปวันลาคงเหลือของพนักงาน (ณ วันที่พิมพ์):</span>
+            <div id="slip-leave-balances">
+              <!-- Inserted dynamically as 4-column table -->
             </div>
           </div>
 
-          <!-- Signatures Section -->
-          <div class="grid grid-cols-3 gap-6 pt-8 text-center text-xs">
-            <div class="space-y-12">
-              <div class="h-10 border-b border-slate-400"></div>
-              <div>
-                <p class="font-semibold">(ลงชื่อผู้ขอลา)</p>
-                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
-              </div>
-            </div>
-
-            <div class="space-y-12">
-              <div class="h-10 border-b border-slate-400"></div>
-              <div>
-                <p class="font-semibold">(ลงชื่อหัวหน้างาน / ผู้บังคับบัญชา)</p>
-                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
-              </div>
-            </div>
-
-            <div class="space-y-12">
-              <div class="h-10 border-b border-slate-400"></div>
-              <div>
-                <p class="font-semibold">(ลงชื่อผู้อนุมัติฝ่ายบุคคล HR)</p>
-                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
-              </div>
-            </div>
-          </div>
+          <!-- Signatures Section (3 Columns Side by Side) -->
+          <table class="signatures-table" style="width: 100%; border-collapse: collapse; margin-top: 35px; border: none; text-align: center;">
+            <tbody>
+              <tr>
+                <td style="width: 33.33%; padding: 0 12px; border: none; vertical-align: top; text-align: center;">
+                  <div style="height: 45px; border-bottom: 1px dotted #475569; margin: 0 10px 8px 10px;"></div>
+                  <p style="margin: 0; font-weight: 600; font-size: 12px; color: #0f172a;">(ลงชื่อผู้ขอลา)</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">วันที่ ......../......../............</p>
+                </td>
+                <td style="width: 33.33%; padding: 0 12px; border: none; vertical-align: top; text-align: center;">
+                  <div style="height: 45px; border-bottom: 1px dotted #475569; margin: 0 10px 8px 10px;"></div>
+                  <p style="margin: 0; font-weight: 600; font-size: 12px; color: #0f172a;">(ลงชื่อหัวหน้างาน / ผู้บังคับบัญชา)</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">วันที่ ......../......../............</p>
+                </td>
+                <td style="width: 33.33%; padding: 0 12px; border: none; vertical-align: top; text-align: center;">
+                  <div style="height: 45px; border-bottom: 1px dotted #475569; margin: 0 10px 8px 10px;"></div>
+                  <p style="margin: 0; font-weight: 600; font-size: 12px; color: #0f172a;">(ลงชื่อผู้อนุมัติฝ่ายบุคคล HR)</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">วันที่ ......../......../............</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

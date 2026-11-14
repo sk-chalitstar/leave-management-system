@@ -185,6 +185,14 @@ body {
     border: 1px solid #cbd5e1 !important;
     padding: 6px 10px !important;
   }
+
+  /* ตารางลายเซ็นท้ายเอกสาร ไม่ต้องมีเส้นขอบช่อง */
+  table.signatures-table,
+  table.signatures-table td,
+  .signatures-table td {
+    border: none !important;
+    padding: 0 10px !important;
+  }
 }
 
 .print-only {

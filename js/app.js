@@ -173,6 +173,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderDashboardRecentTable();
       populateEmployeeSelects();
       populateDepartmentSelects();
+      populateReportYearFilter();
       renderLeaveHistoryTable();
       renderEmployeeCards();
       renderHolidaysTable();
@@ -445,6 +446,38 @@ document.addEventListener("DOMContentLoaded", () => {
         reportSelect.value = currentReportEmp;
       }
     }
+  }
+
+  /**
+   * เติมข้อมูลลง Dropdown เลือกปีรายงาน (พ.ศ. / ค.ศ.)
+   */
+  function populateReportYearFilter() {
+    const yearSelect = document.getElementById("report-filter-year");
+    if (!yearSelect) return;
+
+    const currentYear = new Date().getFullYear();
+    const yearsSet = new Set([currentYear, currentYear - 1, currentYear - 2, currentYear + 1]);
+
+    (state.leaveRequests || []).forEach(r => {
+      if (r.start_date) {
+        const y = parseInt(LeaveAPI.formatDateISO(r.start_date).slice(0, 4), 10);
+        if (!isNaN(y) && y > 2000) yearsSet.add(y);
+      }
+      if (r.end_date) {
+        const y = parseInt(LeaveAPI.formatDateISO(r.end_date).slice(0, 4), 10);
+        if (!isNaN(y) && y > 2000) yearsSet.add(y);
+      }
+    });
+
+    const sortedYears = Array.from(yearsSet).sort((a, b) => b - a);
+    const currentValue = yearSelect.value;
+
+    yearSelect.innerHTML = `<option value="">-- ทุกปี (All Years) --</option>` +
+      sortedYears.map(y => {
+        const thYear = y + 543;
+        const isCurrent = y === currentYear ? " (ปีปัจจุบัน)" : "";
+        return `<option value="${y}" ${String(y) === String(currentValue) ? "selected" : ""}>พ.ศ. ${thYear} (${y})${isCurrent}</option>`;
+      }).join("");
   }
 
   /**
@@ -1644,6 +1677,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const periodText = document.getElementById("report-header-period");
     const empSummaryCard = document.getElementById("report-employee-summary-card");
 
+    const selectedYear = document.getElementById("report-filter-year")?.value || "";
     const startDate = document.getElementById("report-filter-start")?.value || "";
     const endDate = document.getElementById("report-filter-end")?.value || "";
     const empId = document.getElementById("report-filter-emp")?.value || "";
@@ -1772,13 +1806,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let filtered = [...state.leaveRequests];
 
+    if (selectedYear) {
+      filtered = filtered.filter(r => {
+        const sY = LeaveAPI.formatDateISO(r.start_date).slice(0, 4);
+        const eY = LeaveAPI.formatDateISO(r.end_date).slice(0, 4);
+        return sY === selectedYear || eY === selectedYear;
+      });
+    }
     if (startDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.start_date) >= startDate);
     if (endDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.end_date) <= endDate);
     if (empId) filtered = filtered.filter(r => String(r.emp_id).trim() === String(empId).trim());
     if (leaveType) filtered = filtered.filter(r => r.leave_type === leaveType);
 
     if (periodText) {
-      periodText.textContent = `ข้อมูล ณ วันที่: ${new Date().toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })} ${startDate && endDate ? `(ช่วงวันที่ ${startDate} ถึง ${endDate})` : ""}`;
+      const yearStr = selectedYear ? `[ประจำปี พ.ศ. ${parseInt(selectedYear) + 543} (${selectedYear})]` : "";
+      const dateRangeStr = (startDate && endDate) ? `(ช่วงวันที่ ${startDate} ถึง ${endDate})` : "";
+      periodText.textContent = `ข้อมูล ณ วันที่: ${new Date().toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })} ${yearStr} ${dateRangeStr}`.trim();
     }
 
     const cardsContainer = document.getElementById("report-cards-container");
@@ -1915,12 +1958,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!table) return;
 
     const empId = document.getElementById("report-filter-emp")?.value || "";
+    const selectedYear = document.getElementById("report-filter-year")?.value || "";
     const selectedEmp = empId ? state.employees.find(e => String(e.emp_id).trim() === String(empId).trim()) : null;
 
     const wb = XLSX.utils.table_to_book(table, { sheet: "Leave_Report" });
     const today = new Date().toISOString().slice(0, 10);
     const suffix = selectedEmp ? `_${selectedEmp.emp_id}_${selectedEmp.name.replace(/\s+/g, "_")}` : "";
-    XLSX.writeFile(wb, `Leave_History_Report${suffix}_${today}.xlsx`);
+    const yearSuffix = selectedYear ? `_Year${selectedYear}` : "";
+    XLSX.writeFile(wb, `Leave_History_Report${suffix}${yearSuffix}_${today}.xlsx`);
   }
 
   function openPrintableLeaveSlip(req) {
@@ -1946,22 +1991,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const balContainer = document.getElementById("slip-leave-balances");
     if (balances && balContainer) {
       balContainer.innerHTML = `
-        <div class="p-1 border border-slate-200 rounded">
-          <span class="block text-[10px] text-slate-500">พักร้อนคงเหลือ</span>
-          <span class="font-bold text-blue-700">${balances.annual.remaining} วัน</span>
-        </div>
-        <div class="p-1 border border-slate-200 rounded">
-          <span class="block text-[10px] text-slate-500">ลากิจคงเหลือ</span>
-          <span class="font-bold text-purple-700">${balances.personal.remaining} วัน</span>
-        </div>
-        <div class="p-1 border border-slate-200 rounded">
-          <span class="block text-[10px] text-slate-500">ลาป่วยคงเหลือ</span>
-          <span class="font-bold text-rose-700">${balances.sick.remaining} วัน</span>
-        </div>
-        <div class="p-1 border border-slate-200 rounded">
-          <span class="block text-[10px] text-slate-500">อื่นๆ คงเหลือ</span>
-          <span class="font-bold text-amber-700">${balances.other.remaining} วัน</span>
-        </div>
+        <table class="slip-balance-table" style="width: 100%; border-collapse: collapse; margin-top: 4px; text-align: center; border: 1px solid #cbd5e1;">
+          <tbody>
+            <tr>
+              <td style="width: 25%; padding: 8px 4px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                <span style="display: block; font-size: 11px; color: #1e40af; font-weight: 600;">พักร้อนคงเหลือ</span>
+                <span style="display: block; font-size: 14px; font-weight: 700; color: #1d4ed8; margin-top: 2px;">${balances.annual.remaining} วัน</span>
+              </td>
+              <td style="width: 25%; padding: 8px 4px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                <span style="display: block; font-size: 11px; color: #6b21a8; font-weight: 600;">ลากิจคงเหลือ</span>
+                <span style="display: block; font-size: 14px; font-weight: 700; color: #7e22ce; margin-top: 2px;">${balances.personal.remaining} วัน</span>
+              </td>
+              <td style="width: 25%; padding: 8px 4px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                <span style="display: block; font-size: 11px; color: #9f1239; font-weight: 600;">ลาป่วยคงเหลือ</span>
+                <span style="display: block; font-size: 14px; font-weight: 700; color: #e11d48; margin-top: 2px;">${balances.sick.remaining} วัน</span>
+              </td>
+              <td style="width: 25%; padding: 8px 4px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                <span style="display: block; font-size: 11px; color: #92400e; font-weight: 600;">อื่นๆ คงเหลือ</span>
+                <span style="display: block; font-size: 14px; font-weight: 700; color: #d97706; margin-top: 2px;">${balances.other.remaining} วัน</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       `;
     }
 
@@ -1986,12 +2037,20 @@ document.addEventListener("DOMContentLoaded", () => {
    * และการดาวน์โหลดรายงานเป็นไฟล์ HTML / PDF สำหรับเปิดใน Safari หรือส่งต่อ
    */
   function openPrintableReportModal() {
+    const selectedYear = document.getElementById("report-filter-year")?.value || "";
     const startDate = document.getElementById("report-filter-start")?.value || "";
     const endDate = document.getElementById("report-filter-end")?.value || "";
     const empId = document.getElementById("report-filter-emp")?.value || "";
     const leaveType = document.getElementById("report-filter-type")?.value || "";
 
     let filtered = [...state.leaveRequests];
+    if (selectedYear) {
+      filtered = filtered.filter(r => {
+        const sY = LeaveAPI.formatDateISO(r.start_date).slice(0, 4);
+        const eY = LeaveAPI.formatDateISO(r.end_date).slice(0, 4);
+        return sY === selectedYear || eY === selectedYear;
+      });
+    }
     if (startDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.start_date) >= startDate);
     if (endDate) filtered = filtered.filter(r => LeaveAPI.formatDateISO(r.end_date) <= endDate);
     if (empId) filtered = filtered.filter(r => String(r.emp_id).trim() === String(empId).trim());
@@ -2011,6 +2070,8 @@ document.addEventListener("DOMContentLoaded", () => {
       periodLabel = `ถึงวันที่ ${LeaveAPI.formatDateDMY(endDate)}`;
     }
 
+    const yearLabel = selectedYear ? `พ.ศ. ${parseInt(selectedYear) + 543} (${selectedYear})` : "ทุกปี";
+
     let filterScopeLabel = "พนักงานทุกคนในระบบ";
     if (selectedEmp) {
       filterScopeLabel = `${selectedEmp.name} (รหัส: ${selectedEmp.emp_id} • แผนก: ${selectedEmp.department})`;
@@ -2021,38 +2082,42 @@ document.addEventListener("DOMContentLoaded", () => {
       typeScopeLabel = CONFIG.LEAVE_TYPES[leaveType].name;
     }
 
-    // สรุปยอดโควตาวันลาเมื่อเลือกพนักงานเฉพาะราย
+    // สรุปยอดโควตาวันลาเมื่อเลือกพนักงานเฉพาะราย (ใช้ตาราง 4 ช่องเรียบร้อย ไม่พังในทุกเบราว์เซอร์)
     let quotaHtml = "";
     if (selectedEmp) {
       const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests);
       quotaHtml = `
-        <div class="border border-slate-300 rounded-lg p-3 bg-slate-50/80 text-xs">
-          <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-200">
-            <span class="font-bold text-slate-800">📊 สรุปสิทธิ์วันลาคงเหลือของพนักงาน (ณ วันที่พิมพ์):</span>
-            <span class="font-mono text-[11px] text-slate-500">${escapeHtml(selectedEmp.emp_id)} - ${escapeHtml(selectedEmp.name)}</span>
+        <div class="border border-slate-300 rounded-lg p-3 bg-slate-50/90 text-xs" style="border: 1px solid #cbd5e1; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 10px 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-bottom: 8px;">
+            <span style="font-weight: 700; color: #1e293b;">📊 สรุปสิทธิ์วันลาคงเหลือของพนักงาน (ณ วันที่พิมพ์):</span>
+            <span style="font-family: monospace; font-size: 11px; color: #64748b;">${escapeHtml(selectedEmp.emp_id)} - ${escapeHtml(selectedEmp.name)}</span>
           </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-            <div class="bg-white p-2 rounded border border-blue-200">
-              <span class="block text-[11px] text-blue-800 font-semibold">ลาพักร้อน</span>
-              <span class="font-mono font-bold text-slate-900">${balances.annual.used} / ${balances.annual.quota} วัน</span>
-              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.annual.remaining} วัน</span>
-            </div>
-            <div class="bg-white p-2 rounded border border-purple-200">
-              <span class="block text-[11px] text-purple-800 font-semibold">ลากิจ</span>
-              <span class="font-mono font-bold text-slate-900">${balances.personal.used} / ${balances.personal.quota} วัน</span>
-              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.personal.remaining} วัน</span>
-            </div>
-            <div class="bg-white p-2 rounded border border-rose-200">
-              <span class="block text-[11px] text-rose-800 font-semibold">ลาป่วย</span>
-              <span class="font-mono font-bold text-slate-900">${balances.sick.used} / ${balances.sick.quota} วัน</span>
-              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.sick.remaining} วัน</span>
-            </div>
-            <div class="bg-white p-2 rounded border border-amber-200">
-              <span class="block text-[11px] text-amber-800 font-semibold">ลาอื่นๆ</span>
-              <span class="font-mono font-bold text-slate-900">${balances.other.used} / ${balances.other.quota} วัน</span>
-              <span class="block text-[10px] text-emerald-700 font-medium">เหลือ ${balances.other.remaining} วัน</span>
-            </div>
-          </div>
+          <table style="width: 100%; border-collapse: collapse; text-align: center; border: 1px solid #cbd5e1;">
+            <tbody>
+              <tr>
+                <td style="width: 25%; padding: 8px 6px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                  <span style="display: block; font-size: 11px; color: #1e40af; font-weight: 600;">ลาพักร้อน</span>
+                  <span style="display: block; font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 1px;">${balances.annual.used} / ${balances.annual.quota} วัน</span>
+                  <span style="display: block; font-size: 10px; color: #047857; font-weight: 600;">เหลือ ${balances.annual.remaining} วัน</span>
+                </td>
+                <td style="width: 25%; padding: 8px 6px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                  <span style="display: block; font-size: 11px; color: #6b21a8; font-weight: 600;">ลากิจ</span>
+                  <span style="display: block; font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 1px;">${balances.personal.used} / ${balances.personal.quota} วัน</span>
+                  <span style="display: block; font-size: 10px; color: #047857; font-weight: 600;">เหลือ ${balances.personal.remaining} วัน</span>
+                </td>
+                <td style="width: 25%; padding: 8px 6px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                  <span style="display: block; font-size: 11px; color: #9f1239; font-weight: 600;">ลาป่วย</span>
+                  <span style="display: block; font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 1px;">${balances.sick.used} / ${balances.sick.quota} วัน</span>
+                  <span style="display: block; font-size: 10px; color: #047857; font-weight: 600;">เหลือ ${balances.sick.remaining} วัน</span>
+                </td>
+                <td style="width: 25%; padding: 8px 6px; border: 1px solid #cbd5e1; background: #ffffff; text-align: center;">
+                  <span style="display: block; font-size: 11px; color: #92400e; font-weight: 600;">ลาอื่นๆ</span>
+                  <span style="display: block; font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 1px;">${balances.other.used} / ${balances.other.quota} วัน</span>
+                  <span style="display: block; font-size: 10px; color: #047857; font-weight: 600;">เหลือ ${balances.other.remaining} วัน</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       `;
     }
@@ -2101,12 +2166,19 @@ document.addEventListener("DOMContentLoaded", () => {
             <h1 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">รายงานสรุปประวัติการลางานของพนักงาน</h1>
             <p class="text-xs text-slate-600 mt-1">LEAVE HISTORY &amp; ATTENDANCE SUMMARY REPORT • บริษัท เจริญอุตสาหกรรม จำกัด (มหาชน)</p>
             
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-600 mt-4 pt-2.5 border-t border-slate-200 text-left">
-              <div><b>วันที่พิมพ์รายงาน:</b> ${nowDateThai} (${nowTime} น.)</div>
-              <div><b>ช่วงเวลา:</b> ${periodLabel}</div>
-              <div><b>ประเภทการลา:</b> ${typeScopeLabel}</div>
-              <div class="sm:col-span-3"><b>ขอบเขตข้อมูล:</b> ${filterScopeLabel}</div>
-            </div>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 14px; border: none; font-size: 12px; text-align: left;">
+              <tbody>
+                <tr>
+                  <td style="border: none; padding: 3px 0; width: 33.33%;"><b>วันที่พิมพ์รายงาน:</b> ${nowDateThai} (${nowTime} น.)</td>
+                  <td style="border: none; padding: 3px 0; width: 33.33%;"><b>ประจำปีรายงาน:</b> ${yearLabel}</td>
+                  <td style="border: none; padding: 3px 0; width: 33.33%;"><b>ประเภทการลา:</b> ${typeScopeLabel}</td>
+                </tr>
+                <tr>
+                  <td style="border: none; padding: 3px 0;" colspan="2"><b>ขอบเขตข้อมูล:</b> ${filterScopeLabel}</td>
+                  <td style="border: none; padding: 3px 0;"><b>ช่วงวันที่:</b> ${periodLabel}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           <!-- Employee Quota Breakdown (if employee selected) -->
@@ -2141,32 +2213,28 @@ document.addEventListener("DOMContentLoaded", () => {
             </table>
           </div>
 
-          <!-- Signatures Footer -->
-          <div class="grid grid-cols-3 gap-4 pt-6 text-center text-xs">
-            <div class="space-y-12">
-              <div class="h-10 border-b border-slate-400"></div>
-              <div>
-                <p class="font-semibold text-slate-900">(ลงชื่อผู้จัดทำรายงาน)</p>
-                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
-              </div>
-            </div>
-
-            <div class="space-y-12">
-              <div class="h-10 border-b border-slate-400"></div>
-              <div>
-                <p class="font-semibold text-slate-900">(ลงชื่อหัวหน้างาน / ผู้ตรวจสอบ)</p>
-                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
-              </div>
-            </div>
-
-            <div class="space-y-12">
-              <div class="h-10 border-b border-slate-400"></div>
-              <div>
-                <p class="font-semibold text-slate-900">(ลงชื่อผู้อนุมัติฝ่ายบุคคล HR)</p>
-                <p class="text-slate-500 mt-1">วันที่ ......../......../............</p>
-              </div>
-            </div>
-          </div>
+          <!-- Signatures Footer (3 Columns Side by Side) -->
+          <table class="signatures-table" style="width: 100%; border-collapse: collapse; margin-top: 35px; border: none; text-align: center;">
+            <tbody>
+              <tr>
+                <td style="width: 33.33%; padding: 0 12px; border: none; vertical-align: top; text-align: center;">
+                  <div style="height: 45px; border-bottom: 1px dotted #475569; margin: 0 10px 8px 10px;"></div>
+                  <p style="margin: 0; font-weight: 600; font-size: 12px; color: #0f172a;">(ลงชื่อผู้จัดทำรายงาน)</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">วันที่ ......../......../............</p>
+                </td>
+                <td style="width: 33.33%; padding: 0 12px; border: none; vertical-align: top; text-align: center;">
+                  <div style="height: 45px; border-bottom: 1px dotted #475569; margin: 0 10px 8px 10px;"></div>
+                  <p style="margin: 0; font-weight: 600; font-size: 12px; color: #0f172a;">(ลงชื่อหัวหน้างาน / ผู้ตรวจสอบ)</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">วันที่ ......../......../............</p>
+                </td>
+                <td style="width: 33.33%; padding: 0 12px; border: none; vertical-align: top; text-align: center;">
+                  <div style="height: 45px; border-bottom: 1px dotted #475569; margin: 0 10px 8px 10px;"></div>
+                  <p style="margin: 0; font-weight: 600; font-size: 12px; color: #0f172a;">(ลงชื่อผู้อนุมัติฝ่ายบุคคล HR)</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">วันที่ ......../......../............</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       `;
     }
@@ -2223,6 +2291,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const sheetContent = sheet.innerHTML;
     const today = new Date().toISOString().slice(0, 10);
     const empId = document.getElementById("report-filter-emp")?.value || "";
+    const selectedYear = document.getElementById("report-filter-year")?.value || "";
 
     const fullHtml = `<!DOCTYPE html>
 <html lang="th">
@@ -2233,69 +2302,85 @@ document.addEventListener("DOMContentLoaded", () => {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { box-sizing: border-box; }
     body {
       font-family: 'Prompt', system-ui, -apple-system, sans-serif;
       margin: 0;
-      padding: 20px;
-      background-color: #f8fafc;
+      padding: 24px;
+      background-color: #f1f5f9;
       color: #0f172a;
-      font-size: 12px;
+      font-size: 13px;
     }
     .page-container {
       max-width: 960px;
       margin: 0 auto;
       background: #ffffff;
-      padding: 24px;
+      padding: 32px;
       border-radius: 12px;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
     }
     table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 12px 0;
+      width: 100% !important;
+      border-collapse: collapse !important;
+      margin: 12px 0 !important;
     }
     th, td {
-      border: 1px solid #94a3b8;
-      padding: 7px 10px;
+      border: 1px solid #cbd5e1 !important;
+      padding: 8px 10px !important;
       text-align: left;
     }
     th {
-      background-color: #f1f5f9;
+      background-color: #f8fafc !important;
       font-weight: 700;
       color: #0f172a;
     }
-    .text-center { text-align: center; }
-    .text-right { text-align: right; }
-    .font-bold { font-weight: 700; }
-    .font-mono { font-family: monospace; }
+    table.signatures-table,
+    table.signatures-table td,
+    .signatures-table td {
+      border: none !important;
+      padding: 0 12px !important;
+      text-align: center !important;
+      vertical-align: top !important;
+    }
+    table.signatures-table div {
+      height: 45px !important;
+      border-bottom: 1px dotted #475569 !important;
+      margin: 0 10px 8px 10px !important;
+    }
+    .text-center { text-align: center !important; }
+    .text-right { text-align: right !important; }
+    .font-bold { font-weight: 700 !important; }
+    .font-mono { font-family: monospace !important; }
     .btn-topbar {
+      max-width: 960px;
+      margin: 0 auto 16px auto;
       display: flex;
       justify-content: flex-end;
       gap: 10px;
-      margin-bottom: 16px;
     }
     .btn-action {
       background: #2563eb;
       color: white;
       border: none;
-      padding: 10px 18px;
+      padding: 10px 20px;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
+      box-shadow: 0 2px 6px rgba(37,99,235,0.3);
     }
     @media print {
-      body { background: #ffffff; padding: 0; }
-      .page-container { box-shadow: none; padding: 0; max-width: 100%; }
+      body { background: #ffffff !important; padding: 0 !important; }
+      .page-container { box-shadow: none !important; padding: 0 !important; max-width: 100% !important; border-radius: 0 !important; }
       .btn-topbar { display: none !important; }
     }
   </style>
 </head>
 <body>
   <div class="btn-topbar">
-    <button class="btn-action" onclick="window.print()">🖨️ สั่งพิมพ์เอกสาร (AirPrint / Save as PDF)</button>
+    <button class="btn-action" onclick="window.print()">🖨️ สั่งพิมพ์เอกสารนี้ (AirPrint / Save as PDF)</button>
   </div>
   <div class="page-container">
     ${sheetContent}
@@ -2314,7 +2399,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Leave_Report_${empId ? empId + "_" : ""}${today}.html`;
+    a.download = `Leave_Report_${empId ? empId + "_" : ""}${selectedYear ? "Year" + selectedYear + "_" : ""}${today}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2351,57 +2436,78 @@ document.addEventListener("DOMContentLoaded", () => {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { box-sizing: border-box; }
     body {
       font-family: 'Prompt', system-ui, -apple-system, sans-serif;
       margin: 0;
-      padding: 20px;
-      background-color: #f8fafc;
+      padding: 24px;
+      background-color: #f1f5f9;
       color: #0f172a;
-      font-size: 12px;
+      font-size: 13px;
     }
     .page-container {
-      max-width: 800px;
+      max-width: 820px;
       margin: 0 auto;
       background: #ffffff;
-      padding: 24px;
+      padding: 32px;
       border-radius: 12px;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
     }
     table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 12px 0;
+      width: 100% !important;
+      border-collapse: collapse !important;
+      margin: 12px 0 !important;
     }
     th, td {
-      border: 1px solid #94a3b8;
-      padding: 7px 10px;
+      border: 1px solid #cbd5e1 !important;
+      padding: 8px 10px !important;
       text-align: left;
     }
-    .text-center { text-align: center; }
-    .text-right { text-align: right; }
-    .font-bold { font-weight: 700; }
-    .font-mono { font-family: monospace; }
+    th {
+      background-color: #f8fafc !important;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    table.signatures-table,
+    table.signatures-table td,
+    .signatures-table td {
+      border: none !important;
+      padding: 0 12px !important;
+      text-align: center !important;
+      vertical-align: top !important;
+    }
+    table.signatures-table div {
+      height: 45px !important;
+      border-bottom: 1px dotted #475569 !important;
+      margin: 0 10px 8px 10px !important;
+    }
+    .text-center { text-align: center !important; }
+    .text-right { text-align: right !important; }
+    .font-bold { font-weight: 700 !important; }
+    .font-mono { font-family: monospace !important; }
     .btn-topbar {
+      max-width: 820px;
+      margin: 0 auto 16px auto;
       display: flex;
       justify-content: flex-end;
       gap: 10px;
-      margin-bottom: 16px;
     }
     .btn-action {
       background: #2563eb;
       color: white;
       border: none;
-      padding: 10px 18px;
+      padding: 10px 20px;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
+      box-shadow: 0 2px 6px rgba(37,99,235,0.3);
     }
     @media print {
-      body { background: #ffffff; padding: 0; }
-      .page-container { box-shadow: none; padding: 0; max-width: 100%; }
+      body { background: #ffffff !important; padding: 0 !important; }
+      .page-container { box-shadow: none !important; padding: 0 !important; max-width: 100% !important; border-radius: 0 !important; }
       .btn-topbar { display: none !important; }
     }
   </style>
@@ -3117,6 +3223,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // Report Filters
+    document.getElementById("report-filter-year")?.addEventListener("change", () => renderReports());
     document.getElementById("report-filter-emp")?.addEventListener("change", () => renderReports());
     document.getElementById("report-filter-type")?.addEventListener("change", () => renderReports());
     document.getElementById("btn-export-excel")?.addEventListener("click", () => exportToExcel());
