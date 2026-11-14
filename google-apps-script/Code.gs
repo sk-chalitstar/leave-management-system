@@ -299,7 +299,38 @@ function getLeaveRequestsData(ss) {
 }
 
 /**
- * ดึงข้อมูลวันหยุด
+ * ค้นหาวันที่ของวันหยุดนักขัตฤกษ์ไทยจากชื่อ (Fallback lookup for Thai national holidays)
+ */
+function lookupThaiHolidayDate(name, year) {
+  if (!name) return "";
+  var n = String(name).trim();
+  var y = String(year || new Date().getFullYear());
+  if (n.indexOf("ปีใหม่") > -1) return y + "-01-01";
+  if (n.indexOf("มาฆ") > -1) return y + "-02-26";
+  if (n.indexOf("จักรี") > -1 || n.indexOf("พระพุทธยอดฟ้า") > -1) return y + "-04-06";
+  if (n.indexOf("สงกรานต์") > -1) {
+    if (n.indexOf("15") > -1 || n.indexOf("สาม") > -1) return y + "-04-15";
+    if (n.indexOf("14") > -1 || n.indexOf("สอง") > -1) return y + "-04-14";
+    return y + "-04-13";
+  }
+  if (n.indexOf("แรงงาน") > -1) return y + "-05-01";
+  if (n.indexOf("ฉัตรมงคล") > -1) return y + "-05-04";
+  if (n.indexOf("วิสาข") > -1) return y + "-05-22";
+  if (n.indexOf("พระบรมราชินี") > -1 && n.indexOf("เฉลิมพระชนมพรรษา") > -1) return y + "-06-03";
+  if (n.indexOf("อาสาฬห") > -1) return y + "-07-20";
+  if (n.indexOf("เข้าพรรษา") > -1) return y + "-07-21";
+  if (n.indexOf("วชิรเกล้า") > -1 || (n.indexOf("เฉลิมพระชนมพรรษา") > -1 && n.indexOf("อยู่หัว") > -1)) return y + "-07-28";
+  if (n.indexOf("แม่แห่งชาติ") > -1 || n.indexOf("พันปีหลวง") > -1) return y + "-08-12";
+  if (n.indexOf("นวมินทร") > -1) return y + "-10-13";
+  if (n.indexOf("ปิยมหาราช") > -1) return y + "-10-23";
+  if (n.indexOf("พ่อแห่งชาติ") > -1 || n.indexOf("วันชาติ") > -1) return y + "-12-05";
+  if (n.indexOf("รัฐธรรมนูญ") > -1) return y + "-12-10";
+  if (n.indexOf("สิ้นปี") > -1) return y + "-12-31";
+  return "";
+}
+
+/**
+ * ดึงข้อมูลวันหยุด (ตรวจสอบโครงสร้างคอลัมน์อย่างแม่นยำ ไม่ให้สับสนระหว่างชื่อวันหยุดและวันที่)
  */
 function getHolidaysData(ss) {
   const sheet = ss.getSheetByName("Holidays");
@@ -309,48 +340,96 @@ function getHolidaysData(ss) {
 
   const headers = data[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
 
-  let colId = 0;
-  let colDate = 1;
-  let colName = 2;
-  let colYear = 3;
+  let colId = -1;
+  let colDate = -1;
+  let colName = -1;
+  let colYear = -1;
 
   for (let c = 0; c < headers.length; c++) {
     const h = headers[c];
-    if (h === "id" || h === "รหัส") colId = c;
-    else if (h.indexOf("date") > -1 || h.indexOf("วัน") > -1) colDate = c;
-    else if (h.indexOf("name") > -1 || h.indexOf("ชื่อ") > -1) colName = c;
-    else if (h.indexOf("year") > -1 || h.indexOf("ปี") > -1) colYear = c;
+    if (h === "id" || h === "รหัส" || h.indexOf("code") > -1) {
+      if (colId === -1) colId = c;
+    } else if (h.indexOf("name") > -1 || h.indexOf("ชื่อ") > -1 || h.indexOf("เทศกาล") > -1 || h.indexOf("รายการ") > -1) {
+      if (colName === -1) colName = c;
+    } else if (h === "date" || h === "holiday_date" || h === "วันที่" || h.indexOf("date") > -1 || h.indexOf("วันเดือนปี") > -1) {
+      if (colDate === -1) colDate = c;
+    } else if (h.indexOf("year") > -1 || h.indexOf("ปี") > -1) {
+      if (colYear === -1) colYear = c;
+    }
   }
 
+  // Fallback defaults
+  if (colId === -1) colId = 0;
+  if (colDate === -1) colDate = 1;
+  if (colName === -1) colName = 2;
+  if (colYear === -1) colYear = 3;
+
+  const currentYear = new Date().getFullYear();
   const list = [];
+
   for (let i = 1; i < data.length; i++) {
     let row = data[i];
     if (!row || row.length === 0) continue;
 
-    let idVal = row[colId];
-    let dateVal = row[colDate];
-    let nameVal = row[colName];
-    let yearVal = row[colYear];
+    let idVal = row[colId] !== undefined ? row[colId] : "";
+    let dateVal = row[colDate] !== undefined ? row[colDate] : "";
+    let nameVal = row[colName] !== undefined ? row[colName] : "";
+    let yearVal = row[colYear] !== undefined ? row[colYear] : "";
 
-    if (!idVal && !dateVal && !nameVal) continue;
+    // ป้องกันกรณีที่ colDate ชี้ไปโดนชื่อภาษาไทย (เช่น ข้อความ "วันขึ้นปีใหม่")
+    if (typeof dateVal === "string" && /[\u0E00-\u0E7F]/.test(dateVal)) {
+      if (!nameVal || typeof nameVal !== "string" || !/[\u0E00-\u0E7F]/.test(nameVal)) {
+        nameVal = dateVal;
+      }
+      dateVal = "";
+    }
 
+    // หาก dateVal ยังว่าง ให้สแกนหา cell ในแถวนี้ที่เป็น Date หรือ string รูปแบบวันที่
+    if (!dateVal) {
+      for (let c = 0; c < row.length; c++) {
+        let cell = row[c];
+        if (cell instanceof Date) {
+          dateVal = cell;
+          break;
+        } else if (typeof cell === "string" && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(cell.trim())) {
+          dateVal = cell.trim();
+          break;
+        }
+      }
+    }
+
+    // จัดรูปแบบ dateVal ให้เป็น YYYY-MM-DD
+    let cleanISO = "";
     if (dateVal instanceof Date) {
-      dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
-    } else if (typeof dateVal === "string" && dateVal.indexOf("T") > -1) {
-      dateVal = dateVal.split("T")[0];
-    } else if (dateVal) {
-      dateVal = String(dateVal).trim();
+      cleanISO = Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } else if (typeof dateVal === "string" && dateVal) {
+      let trimmed = dateVal.trim();
+      if (trimmed.indexOf("T") > -1) trimmed = trimmed.split("T")[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        cleanISO = trimmed;
+      } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+        let p = trimmed.split("/");
+        cleanISO = p[2] + "-" + p[1].padStart(2, "0") + "-" + p[0].padStart(2, "0");
+      }
     }
 
-    if (!yearVal && dateVal && String(dateVal).length >= 4) {
-      yearVal = String(dateVal).substring(0, 4);
+    // ตรวจสอบปี ค.ศ.
+    const safeName = String(nameVal || "").trim();
+    let intYear = parseInt(yearVal) || (cleanISO ? parseInt(cleanISO.slice(0, 4)) : currentYear);
+    if (intYear > 2400) intYear -= 543;
+
+    // หากยังไม่มี cleanISO แต่มี safeName ให้กู้คืนวันที่จากชื่อวันหยุดไทยมาตรฐาน
+    if (!cleanISO && safeName) {
+      cleanISO = lookupThaiHolidayDate(safeName, intYear);
     }
+
+    if (!cleanISO && !safeName) continue;
 
     list.push({
-      id: String(idVal || ("H-" + i)),
-      holiday_date: String(dateVal || ""),
-      name: String(nameVal || ""),
-      year: yearVal ? String(yearVal) : ""
+      id: String(idVal || (cleanISO ? "H-" + cleanISO : "H-" + i)),
+      holiday_date: cleanISO,
+      name: safeName || "วันหยุดนักขัตฤกษ์",
+      year: String(intYear)
     });
   }
   return list;

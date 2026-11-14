@@ -1620,7 +1620,11 @@ document.addEventListener("DOMContentLoaded", () => {
       let thaiLabel = "";
       try {
         const dObj = new Date(cleanISO + "T00:00:00");
-        thaiLabel = dObj.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+        if (!isNaN(dObj.getTime())) {
+          thaiLabel = dObj.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+        } else {
+          thaiLabel = dmy !== "-" ? dmy : "";
+        }
       } catch (e) {
         thaiLabel = dmy;
       }
@@ -3223,18 +3227,29 @@ document.addEventListener("DOMContentLoaded", () => {
       const year = new Date().getFullYear();
       const confirm = await Swal.fire({
         title: `โหลดวันหยุดนักขัตฤกษ์ประจำปี ${year}?`,
-        text: "ระบบจะนำเข้าชุดวันหยุดราชการและวันหยุดนักขัตฤกษ์ไทยมาตรฐานลงในระบบ",
+        text: "ระบบจะนำเข้าชุดวันหยุดราชการและวันหยุดนักขัตฤกษ์ไทยมาตรฐาน 16 วันลงในระบบ",
         icon: "info",
         showCancelButton: true,
-        confirmButtonText: "โหลดวันหยุด",
+        confirmButtonText: "โหลดวันหยุดมาตรฐาน",
         cancelButtonText: "ยกเลิก"
       });
 
       if (confirm.isConfirmed) {
+        // อัปเดตตารางหน้าจอทันที ไม่ต้องรอนาน
+        const defaultList = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(year);
+        state.holidays = defaultList;
+        renderHolidaysTable();
+
+        Swal.fire({
+          title: "กำลังโหลดวันหยุดมาตรฐาน...",
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
+
         try {
           await window.leaveAPI.syncDefaultHolidays(year);
-          Swal.fire({ icon: "success", title: "โหลดวันหยุดเรียบร้อย", timer: 1500, showConfirmButton: false });
-          loadData();
+          Swal.fire({ icon: "success", title: "โหลดวันหยุดไทยมาตรฐานเรียบร้อย", timer: 1500, showConfirmButton: false });
+          await loadData();
         } catch (err) {
           Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
         }

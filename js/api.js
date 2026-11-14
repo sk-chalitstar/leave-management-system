@@ -91,6 +91,14 @@ class LeaveAPI {
       const currentYear = new Date().getFullYear();
       const defaultHols = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(currentYear);
       localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(defaultHols));
+    } else {
+      try {
+        const cached = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+        if (Array.isArray(cached) && cached.length > 0) {
+          const cleaned = cached.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+          localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(cleaned));
+        }
+      } catch (e) {}
     }
     if (!localStorage.getItem(CONFIG.STORAGE_KEYS.DEPARTMENTS)) {
       localStorage.setItem(CONFIG.STORAGE_KEYS.DEPARTMENTS, JSON.stringify(CONFIG.DEPARTMENTS));
@@ -973,103 +981,180 @@ class LeaveAPI {
   }
 
   /**
+   * ค้นหาวันที่ของวันหยุดนักขัตฤกษ์ไทยจากชื่อ (Fallback lookup for Thai national holidays)
+   */
+  static lookupDefaultHolidayDate(name, yearInput) {
+    if (!name) return "";
+    let year = parseInt(yearInput) || new Date().getFullYear();
+    if (year > 2400) year -= 543; // แปลง พ.ศ. เป็น ค.ศ.
+    const yStr = String(year);
+    const n = String(name).trim();
+
+    if (n.includes("ปีใหม่")) return `${yStr}-01-01`;
+    if (n.includes("มาฆ")) return `${yStr}-02-26`;
+    if (n.includes("จักรี") || n.includes("พระพุทธยอดฟ้า")) return `${yStr}-04-06`;
+    if (n.includes("สงกรานต์")) {
+      if (n.includes("15") || n.includes("สาม")) return `${yStr}-04-15`;
+      if (n.includes("14") || n.includes("สอง")) return `${yStr}-04-14`;
+      return `${yStr}-04-13`;
+    }
+    if (n.includes("แรงงาน")) return `${yStr}-05-01`;
+    if (n.includes("ฉัตรมงคล")) return `${yStr}-05-04`;
+    if (n.includes("วิสาข")) return `${yStr}-05-22`;
+    if (n.includes("พระบรมราชินี") && n.includes("เฉลิมพระชนมพรรษา")) return `${yStr}-06-03`;
+    if (n.includes("อาสาฬห")) return `${yStr}-07-20`;
+    if (n.includes("เข้าพรรษา")) return `${yStr}-07-21`;
+    if (n.includes("วชิรเกล้า") || (n.includes("เฉลิมพระชนมพรรษา") && n.includes("อยู่หัว"))) return `${yStr}-07-28`;
+    if (n.includes("แม่แห่งชาติ") || n.includes("พันปีหลวง")) return `${yStr}-08-12`;
+    if (n.includes("นวมินทร")) return `${yStr}-10-13`;
+    if (n.includes("ปิยมหาราช")) return `${yStr}-10-23`;
+    if (n.includes("พ่อแห่งชาติ") || n.includes("วันชาติ")) return `${yStr}-12-05`;
+    if (n.includes("รัฐธรรมนูญ")) return `${yStr}-12-10`;
+    if (n.includes("สิ้นปี")) return `${yStr}-12-31`;
+    return "";
+  }
+
+  /**
+   * Helper: สกัดวันที่ ISO จากค่าใดๆ โดยไม่รับข้อความภาษาไทย
+   */
+  static extractValidDate(val) {
+    if (!val) return "";
+    if (val instanceof Date) {
+      if (isNaN(val.getTime())) return "";
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, "0");
+      const d = String(val.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    if (typeof val === "string") {
+      const s = val.trim();
+      // หากมีตัวอักษรภาษาไทย ปฏิเสธทันที ไม่ใช่วันที่
+      if (/[\u0E00-\u0E7F]/.test(s)) return "";
+      if (s.includes("T")) {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          return `${y}-${m}-${day}`;
+        }
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+        const parts = s.split("/");
+        return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+      }
+      if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
+        const parts = s.split("-");
+        return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+      }
+    }
+    return "";
+  }
+
+  /**
    * Helper: แปลงและตรวจสอบโครงสร้างข้อมูลวันหยุด (Normalize Holiday Object)
    * รองรับทุกรูปแบบชื่อคีย์ทั้งภาษาไทย ภาษาอังกฤษ มีช่องว่าง หรือส่งมาเป็น Array
    */
   static normalizeHoliday(h) {
     if (!h) return null;
 
+    let idVal = "";
+    let dateVal = "";
+    let nameVal = "";
+    let yearVal = "";
+
     if (Array.isArray(h)) {
-      const cleanISO = LeaveAPI.formatDateISO(h[1]);
-      return {
-        id: String(h[0] || (cleanISO ? `H-${cleanISO}` : "")),
-        holiday_date: cleanISO,
-        name: String(h[2] || "").trim(),
-        year: String(h[3] || (cleanISO ? cleanISO.slice(0, 4) : ""))
-      };
-    }
+      idVal = h[0];
+      dateVal = h[1];
+      nameVal = h[2];
+      yearVal = h[3];
+    } else if (typeof h === "object") {
+      idVal = h.id || h.ID || h["รหัส"] || "";
 
-    let idVal = h.id || h.ID || h["รหัส"] || "";
-    let dateVal = h.holiday_date || h.date || h.holidayDate || h.Date || h.Holiday_Date || h["วันที่"] || h["วันที่วันหยุด"] || h["วันหยุด"] || "";
-    let nameVal = h.name || h.holiday_name || h.holidayName || h.Name || h.Holiday_Name || h["ชื่อ"] || h["ชื่อวันหยุด"] || h["วันหยุดนักขัตฤกษ์"] || "";
-    let yearVal = h.year || h.Year || h["ปี"] || h["ปี พ.ศ./ค.ศ."] || "";
+      // ค้นหา Date: ตรวจสอบ key ที่เป็นวันที่ชัดเจน (ไม่รวม key ที่เป็นชื่อ)
+      const explicitDateKeys = ["holiday_date", "date", "holidayDate", "Date", "Holiday_Date", "วันที่", "วันเดือนปี", "วัน/เดือน/ปี"];
+      for (const k of explicitDateKeys) {
+        if (h[k] !== undefined && h[k] !== null && String(h[k]).trim() !== "") {
+          const valid = LeaveAPI.extractValidDate(h[k]);
+          if (valid) {
+            dateVal = valid;
+            break;
+          }
+        }
+      }
 
-    // ค้นหาจาก Keys ทั้งหมดแบบไม่สนตัวพิมพ์เล็กใหญ่และช่องว่าง
-    const keys = Object.keys(h);
-    for (let k of keys) {
-      const cleanK = k.trim().toLowerCase();
-      const val = h[k];
-      if (!idVal && (cleanK === "id" || cleanK === "รหัส")) idVal = val;
-      if (!dateVal && (cleanK.includes("holiday_date") || cleanK.includes("date") || cleanK.includes("วัน"))) dateVal = val;
-      if (!nameVal && (cleanK.includes("name") || cleanK.includes("ชื่อ") || cleanK.includes("เทศกาล"))) nameVal = val;
-      if (!yearVal && (cleanK.includes("year") || cleanK.includes("ปี"))) yearVal = val;
-    }
-
-    // Fallback: ค้นหาจากค่าใน values
-    const vals = Object.values(h);
-    if (!dateVal) {
-      for (let v of vals) {
-        const iso = LeaveAPI.formatDateISO(v);
-        if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-          dateVal = iso;
+      // ค้นหา Name: ตรวจสอบ key ที่เป็นชื่อวันหยุด
+      const explicitNameKeys = ["name", "holiday_name", "holidayName", "Name", "Holiday_Name", "ชื่อ", "ชื่อวันหยุด", "วันหยุด", "วันหยุดนักขัตฤกษ์", "เทศกาล"];
+      for (const k of explicitNameKeys) {
+        if (h[k] !== undefined && h[k] !== null && String(h[k]).trim() !== "") {
+          nameVal = String(h[k]).trim();
           break;
         }
       }
-    }
-    if (!nameVal) {
-      for (let v of vals) {
-        if (typeof v === "string" && v.length > 1 && !v.startsWith("H-") && !v.includes("-") && isNaN(Number(v))) {
-          nameVal = v;
-          break;
+
+      // ค้นหา Year
+      yearVal = h.year || h.Year || h["ปี"] || h["ปี พ.ศ./ค.ศ."] || "";
+      if (yearVal && /[\u0E00-\u0E7F]/.test(String(yearVal))) {
+        yearVal = "";
+      }
+
+      // หาก dateVal ยังไม่พบ ให้สแกนหา value ใน object ที่เป็นรูปแบบวันที่จริง
+      if (!dateVal) {
+        for (const [k, v] of Object.entries(h)) {
+          const cleanK = k.toLowerCase().trim();
+          if (cleanK.includes("name") || cleanK.includes("ชื่อ") || cleanK.includes("เทศกาล")) continue;
+          const valid = LeaveAPI.extractValidDate(v);
+          if (valid) {
+            dateVal = valid;
+            break;
+          }
         }
       }
-    }
-    if (!idVal) {
-      for (let v of vals) {
-        if (typeof v === "string" && v.startsWith("H-")) {
-          idVal = v;
-          break;
+
+      // หาก nameVal ยังไม่พบ ให้หา string ภาษาไทยใน values
+      if (!nameVal) {
+        for (const [k, v] of Object.entries(h)) {
+          if (typeof v === "string" && /[\u0E00-\u0E7F]/.test(v)) {
+            nameVal = v.trim();
+            break;
+          }
         }
       }
     }
 
-    const cleanISO = LeaveAPI.formatDateISO(dateVal);
-    if (!yearVal && cleanISO) {
-      yearVal = cleanISO.slice(0, 4);
+    // ทำความสะอาดวันที่
+    let cleanISO = LeaveAPI.extractValidDate(dateVal);
+
+    // กำหนดปีที่ถูกต้อง
+    let validYear = parseInt(yearVal) || (cleanISO ? parseInt(cleanISO.slice(0, 4)) : new Date().getFullYear());
+    if (validYear > 2400) validYear -= 543;
+
+    // กู้คืนวันที่จากชื่อวันหยุดอัตโนมัติหาก dateVal หายหรือส่งมาไม่ตรงคอลัมน์
+    if (!cleanISO && nameVal) {
+      cleanISO = LeaveAPI.lookupDefaultHolidayDate(nameVal, validYear);
+    }
+
+    if (!cleanISO && !nameVal) return null;
+
+    if (cleanISO && !validYear) {
+      validYear = parseInt(cleanISO.slice(0, 4));
     }
 
     return {
-      id: String(idVal || (cleanISO ? `H-${cleanISO}` : "H-" + Math.random().toString(36).substring(2, 7))),
+      id: String(idVal || (cleanISO ? `H-${cleanISO}` : `H-${Date.now()}`)),
       holiday_date: cleanISO,
       name: String(nameVal || "").trim(),
-      year: String(yearVal || (cleanISO ? cleanISO.slice(0, 4) : new Date().getFullYear()))
+      year: String(validYear || new Date().getFullYear())
     };
   }
 
   /**
-   * แปลงวันที่เป็น YYYY-MM-DD ที่สะอาด
+   * แปลงวันที่เป็น YYYY-MM-DD ที่สะอาด (ปฏิเสธข้อความภาษาไทยเด็ดขาด)
    */
   static formatDateISO(dateInput) {
     if (!dateInput) return "";
-    if (typeof dateInput === "string") {
-      if (dateInput.includes("T")) {
-        const d = new Date(dateInput);
-        if (!isNaN(d.getTime())) {
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, "0");
-          const day = String(d.getDate()).padStart(2, "0");
-          return `${year}-${month}-${day}`;
-        }
-      }
-      return dateInput.slice(0, 10);
-    }
-    if (dateInput instanceof Date) {
-      const year = dateInput.getFullYear();
-      const month = String(dateInput.getMonth() + 1).padStart(2, "0");
-      const day = String(dateInput.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    }
-    return String(dateInput);
+    return LeaveAPI.extractValidDate(dateInput);
   }
 
   /**
@@ -1078,15 +1163,16 @@ class LeaveAPI {
   static formatDateDMY(dateInput, thaiBuddhistYear = false) {
     if (!dateInput) return "-";
     const iso = LeaveAPI.formatDateISO(dateInput);
-    if (!iso || !iso.includes("-")) return String(dateInput);
+    if (!iso || !iso.includes("-")) return "-";
 
     const parts = iso.split("-");
-    if (parts.length < 3) return iso;
+    if (parts.length < 3) return "-";
 
     let year = Number(parts[0]);
     const month = parts[1];
     const day = parts[2];
 
+    if (isNaN(year)) return "-";
     if (thaiBuddhistYear) {
       year += 543;
     }
