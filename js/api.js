@@ -717,6 +717,47 @@ class LeaveAPI {
    * บันทึกวันหยุดนักขัตฤกษ์
    */
   async saveHoliday(holidayData) {
+    const cleanDate = LeaveAPI.formatDateISO(holidayData.holiday_date);
+    const holidayName = String(holidayData.name || "").trim();
+    const id = holidayData.id || (`H-${cleanDate}-${Date.now().toString().slice(-4)}`);
+    const year = Number(cleanDate ? cleanDate.slice(0, 4) : (holidayData.year || new Date().getFullYear()));
+
+    const cleanItem = {
+      id: id,
+      holiday_date: cleanDate,
+      name: holidayName,
+      year: String(year)
+    };
+
+    // 1. ล้างออกจาก Blacklist เสมอ (เพราะผู้ใช้ตั้งใจเพิ่ม/บันทึกรายการนี้เข้ามาใหม่)
+    let deletedKeys = [];
+    try {
+      deletedKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+    } catch (e) {}
+    if (deletedKeys.length > 0) {
+      deletedKeys = deletedKeys.filter(k => {
+        if (holidayName && k === holidayName) return false;
+        if (id && k === id) return false;
+        if (cleanDate && holidayName && k === `${cleanDate}__${holidayName}`) return false;
+        return true;
+      });
+      localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify(deletedKeys));
+    }
+
+    // 2. บันทึกลง LocalStorage เสมอ เพื่อให้หน้าจอแสดงผลได้ทันที
+    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    const idx = holidays.findIndex(h => {
+      const norm = LeaveAPI.normalizeHoliday(h);
+      return norm && (norm.id === id || (norm.holiday_date === cleanDate && norm.name === holidayName));
+    });
+    if (idx !== -1) {
+      holidays[idx] = cleanItem;
+    } else {
+      holidays.push(cleanItem);
+    }
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+
+    // 3. ซิงค์ขึ้น Google Sheets
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -724,27 +765,17 @@ class LeaveAPI {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
             action: "saveHoliday",
-            payload: holidayData
+            payload: cleanItem
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        return result || { success: true, message: "บันทึกวันหยุดเรียบร้อย", item: cleanItem };
       } catch (err) {
         console.warn("GAS save holiday error:", err);
       }
     }
 
-    const holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    const id = holidayData.id || ("H-" + Date.now());
-    const idx = holidays.findIndex(h => h.id === id);
-    const item = { ...holidayData, id: id };
-    if (idx !== -1) {
-      holidays[idx] = item;
-    } else {
-      holidays.push(item);
-    }
-    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
-    return { success: true, message: "บันทึกวันหยุดเรียบร้อย" };
+    return { success: true, message: "บันทึกวันหยุดเรียบร้อย", item: cleanItem };
   }
 
   /**

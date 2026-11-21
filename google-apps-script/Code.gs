@@ -763,13 +763,27 @@ function handleDeleteEmployee(ss, payload) {
  * เพิ่ม/อัปเดตวันหยุดนักขัตฤกษ์
  */
 function handleSaveHoliday(ss, payload) {
-  const sheet = ss.getSheetByName("Holidays");
+  let sheet = ss.getSheetByName("Holidays");
+  if (!sheet) {
+    sheet = ss.insertSheet("Holidays");
+    sheet.getRange(1, 1, 1, 4).setValues([["id", "holiday_date", "name", "year"]]).setFontWeight("bold").setBackground("#EEF2F6");
+  }
+
   const data = sheet.getDataRange().getValues();
+  if (data.length === 0 || !data[0] || data[0].length === 0 || String(data[0][0]).trim() === "") {
+    sheet.getRange(1, 1, 1, 4).setValues([["id", "holiday_date", "name", "year"]]).setFontWeight("bold").setBackground("#EEF2F6");
+  }
+
   const holId = payload.id || ("H-" + new Date().getTime());
+  const holDate = String(payload.holiday_date || "").split("T")[0].trim();
+  const holName = String(payload.name || "").trim();
+  let holYear = payload.year || (holDate ? parseInt(holDate.slice(0, 4)) : new Date().getFullYear());
+  if (holYear > 2400) holYear -= 543;
 
   let foundRow = -1;
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(holId).trim()) {
+    const rowId = String(data[i][0]).trim();
+    if (holId && rowId === holId) {
       foundRow = i + 1;
       break;
     }
@@ -777,18 +791,18 @@ function handleSaveHoliday(ss, payload) {
 
   const rowValues = [
     holId,
-    payload.holiday_date,
-    payload.name,
-    payload.year || new Date(payload.holiday_date).getFullYear()
+    holDate,
+    holName,
+    holYear
   ];
 
   if (foundRow > -1) {
     sheet.getRange(foundRow, 1, 1, 4).setValues([rowValues]);
-    return { success: true, message: "อัปเดตวันหยุดเรียบร้อย", id: holId };
   } else {
     sheet.appendRow(rowValues);
-    return { success: true, message: "เพิ่มวันหยุดใหม่เรียบร้อย", id: holId };
   }
+  SpreadsheetApp.flush();
+  return { success: true, message: "บันทึกวันหยุดเรียบร้อย", id: holId };
 }
 
 /**

@@ -180,8 +180,28 @@ document.addEventListener("DOMContentLoaded", () => {
         return true;
       });
 
-      state.holidays = filteredHols;
-      localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(filteredHols));
+      // ผสานข้อมูลวันหยุดในเครื่อง (ที่เพิ่งเพิ่มเข้ามาใหม่) เพื่อป้องกันปัญหาการดีเลย์ของ Google Sheets
+      const mergedHolidays = [...filteredHols];
+      (state.holidays || []).forEach(existing => {
+        const norm = LeaveAPI.normalizeHoliday(existing);
+        if (norm && norm.holiday_date) {
+          const idKey = String(norm.id || "").trim();
+          const nameKey = String(norm.name || "").trim();
+          const dateNameKey = `${norm.holiday_date}__${norm.name}`;
+
+          if (!deletedHolidayKeys.includes(idKey) && !deletedHolidayKeys.includes(nameKey) && !deletedHolidayKeys.includes(dateNameKey)) {
+            if (!mergedHolidays.some(h => {
+              const hNorm = LeaveAPI.normalizeHoliday(h);
+              return hNorm && ((idKey && String(hNorm.id).trim() === idKey) || (hNorm.holiday_date === norm.holiday_date && hNorm.name === norm.name));
+            })) {
+              mergedHolidays.push(norm);
+            }
+          }
+        }
+      });
+
+      state.holidays = mergedHolidays;
+      localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(mergedHolidays));
 
       // รักษา state.currentEmployee ให้ซิงค์กับข้อมูลใหม่ล่าสุด
       if (state.currentEmployee) {
@@ -3365,27 +3385,79 @@ document.addEventListener("DOMContentLoaded", () => {
     // Open Add Holiday Modal
     document.getElementById("btn-open-add-holiday-modal")?.addEventListener("click", () => {
       document.getElementById("form-holiday").reset();
+      if (holidayDatePicker) {
+        holidayDatePicker.clear();
+      }
       document.getElementById("modal-holiday").classList.remove("hidden");
     });
 
-    // Save Holiday Form
+    // Save Holiday Form (บันทึกวันหยุดใหม่)
     document.getElementById("form-holiday")?.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const rawDate = document.getElementById("holiday-modal-date").value;
+
+      let rawDate = "";
+      if (holidayDatePicker && holidayDatePicker.selectedDates && holidayDatePicker.selectedDates.length > 0) {
+        rawDate = holidayDatePicker.selectedDates[0];
+      }
+      if (!rawDate) {
+        rawDate = document.getElementById("holiday-modal-date")?.value || "";
+      }
+
       const cleanDate = LeaveAPI.formatDateISO(rawDate);
+      const holidayName = (document.getElementById("holiday-modal-name")?.value || "").trim();
+
+      if (!cleanDate) {
+        Swal.fire({ icon: "warning", title: "กรุณาระบุวันที่", text: "กรุณาเลือกวันที่สำหรับวันหยุดก่อนบันทึกครับ" });
+        return;
+      }
+      if (!holidayName) {
+        Swal.fire({ icon: "warning", title: "กรุณาระบุชื่อวันหยุด", text: "กรุณากรอกชื่อวันหยุดหรือเทศกาลครับ" });
+        return;
+      }
+
       const payload = {
+        id: `H-${cleanDate}-${Date.now().toString().slice(-4)}`,
         holiday_date: cleanDate,
-        name: document.getElementById("holiday-modal-name").value.trim(),
+        name: holidayName,
         year: Number(cleanDate.slice(0, 4))
       };
 
+      // 1. เพิ่มเข้า in-memory state ทันทีและเรนเดอร์ลงตารางทันที เพื่อให้ผู้ใช้เห็นผลลัพธ์ทันใจ
+      if (!state.holidays) state.holidays = [];
+      const existingIdx = state.holidays.findIndex(h => {
+        const norm = LeaveAPI.normalizeHoliday(h);
+        return norm && (norm.holiday_date === cleanDate && norm.name === holidayName);
+      });
+      if (existingIdx !== -1) {
+        state.holidays[existingIdx] = payload;
+      } else {
+        state.holidays.push(payload);
+      }
+      localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(state.holidays));
+      renderHolidaysTable();
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> กำลังบันทึก...`;
+      }
+
       try {
         await window.leaveAPI.saveHoliday(payload);
-        Swal.fire({ icon: "success", title: "บันทึกวันหยุดเรียบร้อย", timer: 1500, showConfirmButton: false });
         document.getElementById("modal-holiday").classList.add("hidden");
-        loadData();
+        document.getElementById("form-holiday").reset();
+        if (holidayDatePicker) holidayDatePicker.clear();
+
+        Swal.fire({ icon: "success", title: "บันทึกวันหยุดเรียบร้อย", timer: 1500, showConfirmButton: false });
+        await loadData();
       } catch (err) {
-        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการบันทึก", text: err.message });
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `บันทึกวันหยุด`;
+        }
+        initLucide();
       }
     });
 
