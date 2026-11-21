@@ -242,6 +242,34 @@ class LeaveAPI {
             });
           }
 
+          // ผสานวันหยุดที่ผู้ใช้บันทึกเอง (Custom Holidays) เสมอ เพื่อป้องกันข้อมูลหายเมื่อกดรีเฟรช
+          let customHols = [];
+          try {
+            customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+          } catch (e) {}
+
+          if (customHols.length > 0) {
+            customHols.forEach(ch => {
+              const norm = LeaveAPI.normalizeHoliday(ch);
+              if (norm && norm.holiday_date) {
+                const idKey = String(norm.id || "").trim();
+                const nameKey = String(norm.name || "").trim();
+                const dateNameKey = `${norm.holiday_date}__${norm.name}`;
+                if (!deletedHolidayKeys.includes(idKey) && !deletedHolidayKeys.includes(nameKey) && !deletedHolidayKeys.includes(dateNameKey)) {
+                  const exists = normalizedHolidays.some(h => {
+                    const hId = String(h.id || "").trim();
+                    const hDate = String(h.holiday_date || "").trim();
+                    const hName = String(h.name || "").trim();
+                    return (idKey && hId === idKey) || (hDate === norm.holiday_date && hName === norm.name);
+                  });
+                  if (!exists) {
+                    normalizedHolidays.push(norm);
+                  }
+                }
+              }
+            });
+          }
+
           localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(normalizedHolidays));
 
           return {
@@ -300,6 +328,34 @@ class LeaveAPI {
         if (nameKey && localDeletedHolidayKeys.includes(nameKey)) return false;
         if (dateNameKey && localDeletedHolidayKeys.includes(dateNameKey)) return false;
         return true;
+      });
+    }
+
+    // ผสานวันหยุดที่บันทึกไว้เอง (Custom Holidays)
+    let localCustomHols = [];
+    try {
+      localCustomHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+    } catch (e) {}
+
+    if (localCustomHols.length > 0) {
+      localCustomHols.forEach(ch => {
+        const norm = LeaveAPI.normalizeHoliday(ch);
+        if (norm && norm.holiday_date) {
+          const idKey = String(norm.id || "").trim();
+          const nameKey = String(norm.name || "").trim();
+          const dateNameKey = `${norm.holiday_date}__${norm.name}`;
+          if (!localDeletedHolidayKeys.includes(idKey) && !localDeletedHolidayKeys.includes(nameKey) && !localDeletedHolidayKeys.includes(dateNameKey)) {
+            const exists = normalizedLocalHols.some(h => {
+              const hId = String(h.id || "").trim();
+              const hDate = String(h.holiday_date || "").trim();
+              const hName = String(h.name || "").trim();
+              return (idKey && hId === idKey) || (hDate === norm.holiday_date && hName === norm.name);
+            });
+            if (!exists) {
+              normalizedLocalHols.push(norm);
+            }
+          }
+        }
       });
     }
 
@@ -736,6 +792,7 @@ class LeaveAPI {
     } catch (e) {}
     if (deletedKeys.length > 0) {
       deletedKeys = deletedKeys.filter(k => {
+        if (!k) return false;
         if (holidayName && k === holidayName) return false;
         if (id && k === id) return false;
         if (cleanDate && holidayName && k === `${cleanDate}__${holidayName}`) return false;
@@ -744,7 +801,23 @@ class LeaveAPI {
       localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify(deletedKeys));
     }
 
-    // 2. บันทึกลง LocalStorage เสมอ เพื่อให้หน้าจอแสดงผลได้ทันที
+    // 2. บันทึกลง LEAVE_SAVED_CUSTOM_HOLIDAYS ถาวร เพื่อป้องกันข้อมูลหายเมื่อกดรีเฟรชหน้าเว็บ
+    let customHols = [];
+    try {
+      customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+    } catch (e) {}
+    const cIdx = customHols.findIndex(ch => {
+      const norm = LeaveAPI.normalizeHoliday(ch);
+      return norm && ((norm.id && norm.id === id) || (norm.holiday_date === cleanDate && norm.name === holidayName));
+    });
+    if (cIdx !== -1) {
+      customHols[cIdx] = cleanItem;
+    } else {
+      customHols.push(cleanItem);
+    }
+    localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify(customHols));
+
+    // 3. บันทึกลง LocalStorage เสมอ เพื่อให้หน้าจอแสดงผลได้ทันที
     let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
     const idx = holidays.findIndex(h => {
       const norm = LeaveAPI.normalizeHoliday(h);
@@ -792,7 +865,7 @@ class LeaveAPI {
     if (holidayDate && holidayName) deletedKeys.push(`${holidayDate}__${String(holidayName).trim()}`);
     localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify([...new Set(deletedKeys)]));
 
-    // 2. ลบออกจาก LocalStorage
+    // 2. ลบออกจาก LocalStorage และ LEAVE_SAVED_CUSTOM_HOLIDAYS
     let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
     holidays = holidays.filter(h => {
       const norm = LeaveAPI.normalizeHoliday(h);
@@ -803,6 +876,20 @@ class LeaveAPI {
       return true;
     });
     localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+
+    let customHols = [];
+    try {
+      customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+    } catch (e) {}
+    customHols = customHols.filter(ch => {
+      const norm = LeaveAPI.normalizeHoliday(ch);
+      if (!norm) return false;
+      if (holidayId && String(norm.id).trim() === String(holidayId).trim()) return false;
+      if (holidayName && String(norm.name).trim() === String(holidayName).trim()) return false;
+      if (holidayDate && holidayName && String(norm.name).trim() === String(holidayName).trim() && String(norm.holiday_date).includes(holidayDate)) return false;
+      return true;
+    });
+    localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify(customHols));
 
     // 3. ส่งคำสั่งลบไปยัง Google Sheets
     if (this.isLive()) {
@@ -850,7 +937,7 @@ class LeaveAPI {
     });
     localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify([...new Set(deletedKeys)]));
 
-    // 2. ลบออกจาก LocalStorage
+    // 2. ลบออกจาก LocalStorage และ LEAVE_SAVED_CUSTOM_HOLIDAYS
     const idsToDelete = new Set(items.map(it => String(it.id || "").trim()).filter(Boolean));
     const namesToDelete = new Set(items.map(it => String(it.name || "").trim()).filter(Boolean));
     const keysToDelete = new Set(items.map(it => {
@@ -870,6 +957,21 @@ class LeaveAPI {
       return true;
     });
     localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+
+    let customHols = [];
+    try {
+      customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+    } catch (e) {}
+    customHols = customHols.filter(ch => {
+      const norm = LeaveAPI.normalizeHoliday(ch);
+      if (!norm) return false;
+      if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
+      if (norm.name && namesToDelete.has(String(norm.name).trim())) return false;
+      const k = `${norm.holiday_date}__${norm.name}`;
+      if (keysToDelete.has(k)) return false;
+      return true;
+    });
+    localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify(customHols));
 
     // 3. ซิงค์ลบขึ้น Google Sheets
     if (this.isLive()) {
@@ -933,6 +1035,7 @@ class LeaveAPI {
    */
   async clearAllHolidays() {
     localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify([]));
+    localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify([]));
 
     if (this.isLive()) {
       try {
@@ -1194,38 +1297,93 @@ class LeaveAPI {
   }
 
   /**
-   * Helper: สกัดวันที่ ISO จากค่าใดๆ โดยไม่รับข้อความภาษาไทย
+   * Helper: สกัดวันที่ ISO จากค่าใดๆ รองรับ Date object, ISO, YYYY-MM-DD, DD/MM/YYYY, พ.ศ. (ปี 25xx) และข้อความวันที่ภาษาไทย
    */
   static extractValidDate(val) {
     if (!val) return "";
     if (val instanceof Date) {
       if (isNaN(val.getTime())) return "";
-      const y = val.getFullYear();
+      let y = val.getFullYear();
+      if (y > 2400) y -= 543; // แปลง พ.ศ. เป็น ค.ศ.
       const m = String(val.getMonth() + 1).padStart(2, "0");
       const d = String(val.getDate()).padStart(2, "0");
       return `${y}-${m}-${d}`;
     }
     if (typeof val === "string") {
-      const s = val.trim();
-      // หากมีตัวอักษรภาษาไทย ปฏิเสธทันที ไม่ใช่วันที่
-      if (/[\u0E00-\u0E7F]/.test(s)) return "";
+      let s = val.trim();
+      if (!s) return "";
+
+      // หากมีรหัส ID เช่น "H-2026-11-21-1234" ให้ดึง YYYY-MM-DD ออกมา
+      if (s.startsWith("H-")) {
+        const m = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (m) {
+          let y = parseInt(m[1]);
+          if (y > 2400) y -= 543;
+          return `${y}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+        }
+      }
+
+      // หากเป็น ISO Timestamp เช่น "2026-11-21T00:00:00.000Z"
       if (s.includes("T")) {
         const d = new Date(s);
         if (!isNaN(d.getTime())) {
-          const y = d.getFullYear();
+          let y = d.getFullYear();
+          if (y > 2400) y -= 543;
           const m = String(d.getMonth() + 1).padStart(2, "0");
           const day = String(d.getDate()).padStart(2, "0");
           return `${y}-${m}-${day}`;
         }
+        s = s.split("T")[0].trim();
       }
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
-        const parts = s.split("/");
-        return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+
+      // รูปแบบ YYYY-MM-DD หรือ YYYY/MM/DD
+      const matchYMD = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+      if (matchYMD) {
+        let y = parseInt(matchYMD[1]);
+        if (y > 2400) y -= 543;
+        return `${y}-${matchYMD[2].padStart(2, "0")}-${matchYMD[3].padStart(2, "0")}`;
       }
-      if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
-        const parts = s.split("-");
-        return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+
+      // รูปแบบ DD/MM/YYYY หรือ DD-MM-YYYY
+      const matchDMY = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+      if (matchDMY) {
+        let y = parseInt(matchDMY[3]);
+        if (y > 2400) y -= 543;
+        return `${y}-${matchDMY[2].padStart(2, "0")}-${matchDMY[1].padStart(2, "0")}`;
+      }
+
+      // รูปแบบวันที่ภาษาไทย เช่น "21 พฤศจิกายน 2569", "21 พ.ย. 2026", "21 พ.ย. 69"
+      const thaiMonths = {
+        "ม.ค.": "01", "มกราคม": "01",
+        "ก.พ.": "02", "กุมภาพันธ์": "02",
+        "มี.ค.": "03", "มีนาคม": "03",
+        "เม.ย.": "04", "เมษายน": "04",
+        "พ.ค.": "05", "พฤษภาคม": "05",
+        "มิ.ย.": "06", "มิถุนายน": "06",
+        "ก.ค.": "07", "กรกฎาคม": "07",
+        "ส.ค.": "08", "สิงหาคม": "08",
+        "ก.ย.": "09", "กันยายน": "09",
+        "ต.ค.": "10", "ตุลาคม": "10",
+        "พ.ย.": "11", "พฤศจิกายน": "11",
+        "ธ.ค.": "12", "ธันวาคม": "12"
+      };
+
+      for (const [tName, mNum] of Object.entries(thaiMonths)) {
+        if (s.includes(tName)) {
+          const numbers = s.match(/\d+/g);
+          if (numbers && numbers.length >= 2) {
+            const d = numbers[0].padStart(2, "0");
+            let y = parseInt(numbers[1]);
+            if (y < 100) y += 2500;
+            if (y > 2400) y -= 543;
+            return `${y}-${mNum}-${d}`;
+          }
+        }
+      }
+
+      // หากมีแต่ตัวอักษรภาษาไทยล้วน ไม่มีตัวเลขเลย ไม่ใช่วันที่
+      if (/[\u0E00-\u0E7F]/.test(s) && !/\d/.test(s)) {
+        return "";
       }
     }
     return "";

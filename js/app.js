@@ -119,6 +119,16 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadData() {
     updateConnectionIndicator();
     try {
+      // โหลดข้อมูลวันหยุดจาก LocalStorage ล่วงหน้า เพื่อป้องกันการเป็น Array ว่างตอนรีเฟรชหน้าเว็บ
+      if (!state.holidays || state.holidays.length === 0) {
+        try {
+          const cachedHols = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+          if (cachedHols && cachedHols.length > 0) {
+            state.holidays = cachedHols;
+          }
+        } catch (e) {}
+      }
+
       // ซิงค์คำขอลาที่ค้างส่ง (เช่น เพิ่งเปิดลิงก์เชื่อมต่อ URL บนมือถือ หรือบันทึกไว้ตอนออฟไลน์)
       if (window.leaveAPI.isLive()) {
         try {
@@ -184,6 +194,29 @@ document.addEventListener("DOMContentLoaded", () => {
       const mergedHolidays = [...filteredHols];
       (state.holidays || []).forEach(existing => {
         const norm = LeaveAPI.normalizeHoliday(existing);
+        if (norm && norm.holiday_date) {
+          const idKey = String(norm.id || "").trim();
+          const nameKey = String(norm.name || "").trim();
+          const dateNameKey = `${norm.holiday_date}__${norm.name}`;
+
+          if (!deletedHolidayKeys.includes(idKey) && !deletedHolidayKeys.includes(nameKey) && !deletedHolidayKeys.includes(dateNameKey)) {
+            if (!mergedHolidays.some(h => {
+              const hNorm = LeaveAPI.normalizeHoliday(h);
+              return hNorm && ((idKey && String(hNorm.id).trim() === idKey) || (hNorm.holiday_date === norm.holiday_date && hNorm.name === norm.name));
+            })) {
+              mergedHolidays.push(norm);
+            }
+          }
+        }
+      });
+
+      // ผสานจาก LEAVE_SAVED_CUSTOM_HOLIDAYS ถาวร เพื่อป้องกันข้อมูลหายเมื่อกดรีเฟรชหน้าเว็บ 100%
+      let savedCustomHols = [];
+      try {
+        savedCustomHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+      } catch (e) {}
+      savedCustomHols.forEach(ch => {
+        const norm = LeaveAPI.normalizeHoliday(ch);
         if (norm && norm.holiday_date) {
           const idKey = String(norm.id || "").trim();
           const nameKey = String(norm.name || "").trim();
@@ -1843,6 +1876,21 @@ document.addEventListener("DOMContentLoaded", () => {
         const itemKey = `${holidayDate}__${holidayName}`;
         if (state.selectedHolidays) state.selectedHolidays.delete(itemKey);
         localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(state.holidays));
+
+        // ถอดออกจาก LEAVE_SAVED_CUSTOM_HOLIDAYS ด้วย
+        try {
+          let customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+          customHols = customHols.filter(ch => {
+            const norm = LeaveAPI.normalizeHoliday(ch);
+            if (!norm) return false;
+            if (id && norm.id && String(norm.id).trim() === String(id).trim()) return false;
+            if (holidayName && String(norm.name).trim() === String(holidayName).trim()) return false;
+            if (holidayDate && holidayName && String(norm.name).trim() === String(holidayName).trim() && String(norm.holiday_date).includes(holidayDate)) return false;
+            return true;
+          });
+          localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify(customHols));
+        } catch (e) {}
+
         renderHolidaysTable();
 
         await window.leaveAPI.deleteHoliday(id, holidayDate, holidayName);
@@ -3300,6 +3348,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           state.holidays = [];
           localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify([]));
+          localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify([]));
           renderHolidaysTable();
           await window.leaveAPI.clearAllHolidays();
           Swal.fire({ icon: "success", title: "ลบวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
@@ -3399,8 +3448,15 @@ document.addEventListener("DOMContentLoaded", () => {
       if (holidayDatePicker && holidayDatePicker.selectedDates && holidayDatePicker.selectedDates.length > 0) {
         rawDate = holidayDatePicker.selectedDates[0];
       }
+      if (!rawDate && holidayDatePicker && holidayDatePicker.input) {
+        rawDate = holidayDatePicker.input.value;
+      }
+      if (!rawDate && holidayDatePicker && holidayDatePicker.altInput) {
+        rawDate = holidayDatePicker.altInput.value;
+      }
       if (!rawDate) {
-        rawDate = document.getElementById("holiday-modal-date")?.value || "";
+        const el = document.getElementById("holiday-modal-date");
+        rawDate = el ? el.value : "";
       }
 
       const cleanDate = LeaveAPI.formatDateISO(rawDate);
@@ -3415,12 +3471,34 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      let yearNum = Number(cleanDate.slice(0, 4));
+      if (yearNum > 2400) yearNum -= 543;
+
       const payload = {
         id: `H-${cleanDate}-${Date.now().toString().slice(-4)}`,
         holiday_date: cleanDate,
         name: holidayName,
-        year: Number(cleanDate.slice(0, 4))
+        year: yearNum
       };
+
+      // ถอดออกจาก Blacklist ในเครื่องทันที
+      try {
+        let deletedKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+        deletedKeys = deletedKeys.filter(k => k && k !== payload.id && k !== holidayName && k !== `${cleanDate}__${holidayName}`);
+        localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify(deletedKeys));
+      } catch (err) {}
+
+      // บันทึกลง LEAVE_SAVED_CUSTOM_HOLIDAYS ถาวรทันที
+      try {
+        let customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+        const cIdx = customHols.findIndex(ch => {
+          const norm = LeaveAPI.normalizeHoliday(ch);
+          return norm && (norm.holiday_date === cleanDate && norm.name === holidayName);
+        });
+        if (cIdx !== -1) customHols[cIdx] = payload;
+        else customHols.push(payload);
+        localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify(customHols));
+      } catch (err) {}
 
       // 1. เพิ่มเข้า in-memory state ทันทีและเรนเดอร์ลงตารางทันที เพื่อให้ผู้ใช้เห็นผลลัพธ์ทันใจ
       if (!state.holidays) state.holidays = [];
@@ -3622,6 +3700,22 @@ document.addEventListener("DOMContentLoaded", () => {
           state.selectedHolidays.clear();
           state.holidaySelectMode = false;
           localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(state.holidays));
+
+          // ถอดออกจาก LEAVE_SAVED_CUSTOM_HOLIDAYS ด้วย
+          try {
+            let customHols = JSON.parse(localStorage.getItem("LEAVE_SAVED_CUSTOM_HOLIDAYS") || "[]");
+            customHols = customHols.filter(ch => {
+              const norm = LeaveAPI.normalizeHoliday(ch);
+              if (!norm) return false;
+              if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
+              if (norm.name && namesToDelete.has(String(norm.name).trim())) return false;
+              const k = `${norm.holiday_date}__${norm.name}`;
+              if (keysToDelete.has(k)) return false;
+              return true;
+            });
+            localStorage.setItem("LEAVE_SAVED_CUSTOM_HOLIDAYS", JSON.stringify(customHols));
+          } catch (e) {}
+
           renderHolidaysTable();
 
           await window.leaveAPI.deleteMultipleHolidays(selectedItems);

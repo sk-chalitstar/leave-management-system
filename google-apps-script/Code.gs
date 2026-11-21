@@ -355,7 +355,7 @@ function getHolidaysData(ss) {
       if (colId === -1) colId = c;
     } else if (h.indexOf("name") > -1 || h.indexOf("ชื่อ") > -1 || h.indexOf("เทศกาล") > -1 || h.indexOf("รายการ") > -1) {
       if (colName === -1) colName = c;
-    } else if (h === "date" || h === "holiday_date" || h === "วันที่" || h.indexOf("date") > -1 || h.indexOf("วันเดือนปี") > -1) {
+    } else if (h.indexOf("date") > -1 || h.indexOf("วัน") > -1) {
       if (colDate === -1) colDate = c;
     } else if (h.indexOf("year") > -1 || h.indexOf("ปี") > -1) {
       if (colYear === -1) colYear = c;
@@ -380,8 +380,14 @@ function getHolidaysData(ss) {
     let nameVal = row[colName] !== undefined ? row[colName] : "";
     let yearVal = row[colYear] !== undefined ? row[colYear] : "";
 
+    // หาก dateVal อยู่ในรูปแบบ "H-YYYY-MM-DD"
+    if (typeof dateVal === "string" && dateVal.indexOf("H-") === 0) {
+      const match = dateVal.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (match) dateVal = match[1] + "-" + match[2].padStart(2, "0") + "-" + match[3].padStart(2, "0");
+    }
+
     // ป้องกันกรณีที่ colDate ชี้ไปโดนชื่อภาษาไทย (เช่น ข้อความ "วันขึ้นปีใหม่")
-    if (typeof dateVal === "string" && /[\u0E00-\u0E7F]/.test(dateVal)) {
+    if (typeof dateVal === "string" && /[\u0E00-\u0E7F]/.test(dateVal) && !/\d/.test(dateVal)) {
       if (!nameVal || typeof nameVal !== "string" || !/[\u0E00-\u0E7F]/.test(nameVal)) {
         nameVal = dateVal;
       }
@@ -780,24 +786,50 @@ function handleSaveHoliday(ss, payload) {
   let holYear = payload.year || (holDate ? parseInt(holDate.slice(0, 4)) : new Date().getFullYear());
   if (holYear > 2400) holYear -= 543;
 
+  // ตรวจสอบตำแหน่งคอลัมน์จาก Header จริงใน Sheet
+  const headerRow = data[0];
+  let colId = -1, colDate = -1, colName = -1, colYear = -1;
+  for (let c = 0; c < headerRow.length; c++) {
+    const h = String(headerRow[c] || "").trim().toLowerCase();
+    if (h === "id" || h === "รหัส" || h.indexOf("code") > -1) colId = c;
+    else if (h.indexOf("name") > -1 || h.indexOf("ชื่อ") > -1 || h.indexOf("เทศกาล") > -1) colName = c;
+    else if (h.indexOf("date") > -1 || h.indexOf("วัน") > -1) colDate = c;
+    else if (h.indexOf("year") > -1 || h.indexOf("ปี") > -1) colYear = c;
+  }
+  if (colId === -1) colId = 0;
+  if (colDate === -1) colDate = 1;
+  if (colName === -1) colName = 2;
+  if (colYear === -1) colYear = 3;
+
   let foundRow = -1;
   for (let i = 1; i < data.length; i++) {
-    const rowId = String(data[i][0]).trim();
+    const row = data[i];
+    const rowId = String(row[colId] || "").trim();
+    const rowName = String(row[colName] || "").trim();
     if (holId && rowId === holId) {
+      foundRow = i + 1;
+      break;
+    }
+    if (holName && rowName === holName) {
       foundRow = i + 1;
       break;
     }
   }
 
-  const rowValues = [
-    holId,
-    holDate,
-    holName,
-    holYear
-  ];
+  const maxCol = Math.max(colId, colDate, colName, colYear) + 1;
+  let rowValues = [];
+  if (foundRow > -1) {
+    rowValues = data[foundRow - 1].slice(0, maxCol);
+  } else {
+    for (let c = 0; c < maxCol; c++) rowValues.push("");
+  }
+  rowValues[colId] = holId;
+  rowValues[colDate] = holDate;
+  rowValues[colName] = holName;
+  rowValues[colYear] = holYear;
 
   if (foundRow > -1) {
-    sheet.getRange(foundRow, 1, 1, 4).setValues([rowValues]);
+    sheet.getRange(foundRow, 1, 1, maxCol).setValues([rowValues]);
   } else {
     sheet.appendRow(rowValues);
   }
