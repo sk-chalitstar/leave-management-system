@@ -8,6 +8,8 @@ document.addEventListener("DOMContentLoaded", () => {
     employees: [],
     leaveRequests: [],
     holidays: [],
+    holidaySelectMode: false,
+    selectedHolidays: new Set(),
     currentEmployee: null,
     tempAttachments: [], // รายการไฟล์แนบชั่วคราวในฟอร์มยื่นคำขอ
     editAttachments: [], // รายการไฟล์แนบในฟอร์มแก้ไขคำขอลา
@@ -1592,9 +1594,78 @@ document.addEventListener("DOMContentLoaded", () => {
   /**
    * 5. Holidays Table
    * แสดงวันที่ในรูปแบบ วัน/เดือน/ปี (DD/MM/YYYY) ตามมาตรฐาน และลบรายการได้ 100%
+   * รองรับโหมดเลือกลบทีละรายการ (Selective Checkbox Delete)
    */
+  function updateHolidaySelectedCountUI() {
+    const count = state.selectedHolidays ? state.selectedHolidays.size : 0;
+    const badge = document.getElementById("badge-holiday-selected-count");
+    const txtCount = document.getElementById("txt-holiday-selected-count");
+    const btnDelete = document.getElementById("btn-delete-selected-holidays");
+    const chkSelectAll = document.getElementById("checkbox-holiday-select-all");
+
+    if (badge) badge.textContent = count;
+    if (txtCount) txtCount.textContent = count;
+    if (btnDelete) {
+      btnDelete.disabled = count === 0;
+    }
+
+    const allCheckboxes = document.querySelectorAll(".holiday-row-checkbox");
+    if (chkSelectAll && allCheckboxes.length > 0) {
+      chkSelectAll.checked = count > 0 && count === allCheckboxes.length;
+    } else if (chkSelectAll) {
+      chkSelectAll.checked = false;
+    }
+  }
+
+  function attachHolidayCheckboxEvents() {
+    if (!state.holidaySelectMode) return;
+
+    const checkboxes = document.querySelectorAll(".holiday-row-checkbox");
+    checkboxes.forEach(cb => {
+      cb.addEventListener("change", (e) => {
+        e.stopPropagation();
+        const key = cb.getAttribute("data-key");
+        if (cb.checked) {
+          state.selectedHolidays.add(key);
+          cb.closest("tr")?.classList.add("bg-rose-50/70");
+        } else {
+          state.selectedHolidays.delete(key);
+          cb.closest("tr")?.classList.remove("bg-rose-50/70");
+        }
+        updateHolidaySelectedCountUI();
+      });
+    });
+
+    // ให้แตะหรือคลิกที่แถวตารางเพื่อติ๊กเลือกได้ง่ายขึ้น (สะดวกอย่างยิ่งบนมือถือ)
+    const rows = document.querySelectorAll("#holidays-table-body tr");
+    rows.forEach(tr => {
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest("button") || e.target.closest("input[type='checkbox']")) return;
+        const cb = tr.querySelector(".holiday-row-checkbox");
+        if (cb) {
+          cb.checked = !cb.checked;
+          const key = cb.getAttribute("data-key");
+          if (cb.checked) {
+            state.selectedHolidays.add(key);
+            tr.classList.add("bg-rose-50/70");
+          } else {
+            state.selectedHolidays.delete(key);
+            tr.classList.remove("bg-rose-50/70");
+          }
+          updateHolidaySelectedCountUI();
+        }
+      });
+    });
+  }
+
   function renderHolidaysTable() {
     const tbody = document.getElementById("holidays-table-body");
+    const thCheckbox = document.getElementById("th-holiday-checkbox");
+    const selectionBar = document.getElementById("holidays-selection-bar");
+    const btnSelectMode = document.getElementById("btn-toggle-select-holidays");
+    const txtBtnSelectMode = document.getElementById("txt-btn-select-mode");
+    const chkSelectAll = document.getElementById("checkbox-holiday-select-all");
+
     if (!tbody) return;
 
     // กรองและ Normalize ข้อมูลวันหยุดให้สะอาดและถูกต้องเสมอ
@@ -1602,8 +1673,31 @@ document.addEventListener("DOMContentLoaded", () => {
       .map(h => LeaveAPI.normalizeHoliday(h))
       .filter(h => h && h.holiday_date);
 
+    // ปรับ UI โหมดเลือก
+    if (state.holidaySelectMode) {
+      if (thCheckbox) thCheckbox.classList.remove("hidden");
+      if (selectionBar) selectionBar.classList.remove("hidden");
+      if (btnSelectMode) {
+        btnSelectMode.className = "bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs";
+      }
+      if (txtBtnSelectMode) txtBtnSelectMode.textContent = "ปิดโหมดเลือกลบ";
+    } else {
+      if (thCheckbox) thCheckbox.classList.add("hidden");
+      if (selectionBar) selectionBar.classList.add("hidden");
+      if (btnSelectMode) {
+        btnSelectMode.className = "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors";
+      }
+      if (txtBtnSelectMode) txtBtnSelectMode.textContent = "ลบทีละรายการ";
+      if (state.selectedHolidays) state.selectedHolidays.clear();
+      if (chkSelectAll) chkSelectAll.checked = false;
+    }
+
+    updateHolidaySelectedCountUI();
+
+    const colSpan = state.holidaySelectMode ? 5 : 4;
+
     if (validHolidays.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-400">ยังไม่มีข้อมูลวันหยุดนักขัตฤกษ์ในระบบ กรุณากดปุ่ม "โหลดวันหยุดไทย" หรือ "เพิ่มวันหยุดเอง"</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center py-8 text-slate-400">ยังไม่มีข้อมูลวันหยุดนักขัตฤกษ์ในระบบ กรุณากดปุ่ม "โหลดวันหยุดไทย" หรือ "เพิ่มวันหยุดเอง"</td></tr>`;
       return;
     }
 
@@ -1635,8 +1729,21 @@ document.addEventListener("DOMContentLoaded", () => {
       const displayYear = h.year || cleanISO.slice(0, 4);
       const thYear = displayYear ? (parseInt(displayYear) + 543) : "";
 
+      const itemKey = `${safeDate}__${safeName}`;
+      const isChecked = state.selectedHolidays && state.selectedHolidays.has(itemKey);
+
       return `
-        <tr class="hover:bg-slate-50 transition-colors">
+        <tr class="hover:bg-slate-50 transition-colors ${isChecked ? 'bg-rose-50/70' : ''} ${state.holidaySelectMode ? 'cursor-pointer select-none' : ''}">
+          ${state.holidaySelectMode ? `
+            <td class="py-3 px-3 text-center w-10">
+              <input type="checkbox" class="holiday-row-checkbox w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-slate-300 cursor-pointer" 
+                data-key="${itemKey}" 
+                data-id="${safeId}" 
+                data-date="${safeDate}" 
+                data-name="${safeName}" 
+                ${isChecked ? 'checked' : ''}>
+            </td>
+          ` : ''}
           <td class="py-3 px-4">
             <span class="font-mono font-bold text-slate-800 text-sm">${dmy}</span>
             <span class="text-slate-400 text-xs block">${thaiLabel}</span>
@@ -1646,7 +1753,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ${displayYear} ${thYear ? `<span class="text-xs text-slate-400 font-sans">(พ.ศ. ${thYear})</span>` : ""}
           </td>
           <td class="py-3 px-4 text-right">
-            <button onclick="window.confirmDeleteHoliday('${safeId}', '${safeDate}', '${safeName}')" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ml-auto">
+            <button type="button" onclick="window.confirmDeleteHoliday('${safeId}', '${safeDate}', '${safeName}')" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ml-auto">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               <span>ลบออก</span>
             </button>
@@ -1656,6 +1763,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }).join("");
 
     initLucide();
+    attachHolidayCheckboxEvents();
   }
 
   window.confirmDeleteHoliday = async function(id, holidayDate, holidayName) {
@@ -1671,6 +1779,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (confirm.isConfirmed) {
       try {
+        // อัปเดต in-memory state ทันที
+        state.holidays = (state.holidays || []).filter(h => {
+          const norm = LeaveAPI.normalizeHoliday(h);
+          if (!norm) return false;
+          if (id && norm.id && String(norm.id).trim() === String(id).trim()) return false;
+          if (holidayDate && holidayName && String(norm.name).trim() === String(holidayName).trim() && String(norm.holiday_date).includes(holidayDate)) return false;
+          return true;
+        });
+        const itemKey = `${holidayDate}__${holidayName}`;
+        if (state.selectedHolidays) state.selectedHolidays.delete(itemKey);
+        renderHolidaysTable();
+
         await window.leaveAPI.deleteHoliday(id, holidayDate, holidayName);
         Swal.fire({ icon: "success", title: "ลบวันหยุดเรียบร้อย", timer: 1200, showConfirmButton: false });
         await loadData();
@@ -3252,6 +3372,133 @@ document.addEventListener("DOMContentLoaded", () => {
           await loadData();
         } catch (err) {
           Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        }
+      }
+    });
+
+    // Toggle Select Mode for Holidays (โหมดเลือกลบทีละรายการ มีช่องติ๊กด้านหน้า)
+    document.getElementById("btn-toggle-select-holidays")?.addEventListener("click", () => {
+      const validHolidays = (state.holidays || []).map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+      if (!state.holidaySelectMode && validHolidays.length === 0) {
+        Swal.fire({
+          icon: "info",
+          title: "ไม่มีข้อมูลวันหยุดในระบบ",
+          text: "กรุณากดปุ่ม 'โหลดวันหยุดไทยมาตรฐาน' หรือ 'เพิ่มวันหยุดเอง' ก่อนครับ"
+        });
+        return;
+      }
+      state.holidaySelectMode = !state.holidaySelectMode;
+      if (!state.holidaySelectMode) {
+        state.selectedHolidays.clear();
+      }
+      renderHolidaysTable();
+    });
+
+    // ปุ่มยกเลิกโหมดเลือกลบวันหยุด
+    document.getElementById("btn-cancel-holiday-select")?.addEventListener("click", () => {
+      state.holidaySelectMode = false;
+      state.selectedHolidays.clear();
+      renderHolidaysTable();
+    });
+
+    // Checkbox ติ๊กเลือกวันหยุดทั้งหมด
+    document.getElementById("checkbox-holiday-select-all")?.addEventListener("change", (e) => {
+      const checked = e.target.checked;
+      const checkboxes = document.querySelectorAll(".holiday-row-checkbox");
+      checkboxes.forEach(cb => {
+        cb.checked = checked;
+        const key = cb.getAttribute("data-key");
+        const tr = cb.closest("tr");
+        if (checked) {
+          state.selectedHolidays.add(key);
+          tr?.classList.add("bg-rose-50/70");
+        } else {
+          state.selectedHolidays.delete(key);
+          tr?.classList.remove("bg-rose-50/70");
+        }
+      });
+      updateHolidaySelectedCountUI();
+    });
+
+    // ลบรายการวันหยุดที่เลือก (Batch Delete Selected Holidays)
+    document.getElementById("btn-delete-selected-holidays")?.addEventListener("click", async () => {
+      if (!state.selectedHolidays || state.selectedHolidays.size === 0) {
+        Swal.fire({
+          icon: "warning",
+          title: "ยังไม่ได้เลือกรายการ",
+          text: "กรุณาติ๊กเลือกช่องด้านหน้าวันหยุดที่ต้องการลบก่อนครับ"
+        });
+        return;
+      }
+
+      // รวบรวมข้อมูลวันหยุดที่ถูกติ๊กเลือก
+      const selectedItems = [];
+      const selectedNames = [];
+      const checkboxes = document.querySelectorAll(".holiday-row-checkbox:checked");
+      checkboxes.forEach(cb => {
+        const id = cb.getAttribute("data-id");
+        const date = cb.getAttribute("data-date");
+        const name = cb.getAttribute("data-name");
+        selectedItems.push({ id, holiday_date: date, name });
+        selectedNames.push(`• <b>${name}</b> (${LeaveAPI.formatDateDMY(date)})`);
+      });
+
+      const count = selectedItems.length;
+
+      const confirm = await Swal.fire({
+        title: `ยืนยันการลบ ${count} รายการ?`,
+        html: `
+          <div class="text-left bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1.5 my-2 max-h-48 overflow-y-auto">
+            ${selectedNames.join("<br>")}
+          </div>
+          <p class="text-xs text-rose-600 font-semibold mt-2">รายการวันหยุดที่เลือกจะถูกลบออกจากระบบทันที</p>
+        `,
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#e11d48",
+        cancelButtonColor: "#64748b",
+        confirmButtonText: `ใช่, ลบ ${count} รายการ`,
+        cancelButtonText: "ยกเลิก"
+      });
+
+      if (confirm.isConfirmed) {
+        Swal.fire({
+          title: "กำลังลบรายการที่เลือก...",
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
+
+        try {
+          // ลบออกจาก state.holidays ทันที
+          const keysToDelete = new Set(selectedItems.map(it => `${it.holiday_date}__${it.name}`));
+          const idsToDelete = new Set(selectedItems.map(it => it.id).filter(Boolean));
+
+          state.holidays = (state.holidays || []).filter(h => {
+            const norm = LeaveAPI.normalizeHoliday(h);
+            if (!norm) return false;
+            if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
+            const k = `${norm.holiday_date}__${norm.name}`;
+            if (keysToDelete.has(k)) return false;
+            return true;
+          });
+
+          state.selectedHolidays.clear();
+          state.holidaySelectMode = false;
+          renderHolidaysTable();
+
+          await window.leaveAPI.deleteMultipleHolidays(selectedItems);
+
+          Swal.fire({
+            icon: "success",
+            title: "ลบสำเร็จเรียบร้อย",
+            text: `ลบวันหยุดออกจำนวน ${count} รายการเรียบร้อยแล้ว`,
+            timer: 1600,
+            showConfirmButton: false
+          });
+
+          await loadData();
+        } catch (err) {
+          Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาดในการลบ", text: err.message });
         }
       }
     });

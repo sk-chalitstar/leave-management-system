@@ -750,6 +750,54 @@ class LeaveAPI {
   }
 
   /**
+   * ลบวันหยุดหลายรายการพร้อมกัน (Batch delete holidays)
+   */
+  async deleteMultipleHolidays(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return { success: true, message: "ไม่มีรายการที่ต้องลบ" };
+    }
+
+    if (this.isLive()) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "deleteMultipleHolidays",
+            payload: { items }
+          })
+        });
+        const result = await res.json();
+        if (result && result.success) {
+          // Success from GAS
+        }
+      } catch (err) {
+        console.warn("GAS delete multiple holidays error:", err);
+      }
+    }
+
+    const idsToDelete = new Set(items.map(it => String(it.id || "").trim()).filter(Boolean));
+    const keysToDelete = new Set(items.map(it => {
+      const d = LeaveAPI.formatDateISO(it.holiday_date);
+      const n = String(it.name || "").trim();
+      return d && n ? `${d}_${n}` : "";
+    }).filter(Boolean));
+
+    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    holidays = holidays.filter(h => {
+      const norm = LeaveAPI.normalizeHoliday(h);
+      if (!norm) return false;
+      if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
+      const k = `${norm.holiday_date}_${norm.name}`;
+      if (keysToDelete.has(k)) return false;
+      return true;
+    });
+
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+    return { success: true, message: `ลบวันหยุดเรียบร้อยแล้ว ${items.length} รายการ` };
+  }
+
+  /**
    * ล้างวันหยุดทั้งหมด
    */
   async clearAllHolidays() {

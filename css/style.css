@@ -271,6 +271,15 @@ button, a, input, select, textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Checkbox Styling */
+.holiday-row-checkbox,
+#checkbox-holiday-select-all {
+  width: 1.15rem;
+  height: 1.15rem;
+  cursor: pointer;
+  accent-color: #e11d48;
+}
+
 /* Touch feedback */
 button:active:not(:disabled) {
   transform: scale(0.98);

@@ -117,6 +117,10 @@ function doPost(e) {
         result = handleDeleteHoliday(ss, postData.payload);
         break;
 
+      case "deleteMultipleHolidays":
+        result = handleDeleteMultipleHolidays(ss, postData.payload);
+        break;
+
       case "clearAllHolidays":
         result = handleClearAllHolidays(ss);
         break;
@@ -815,6 +819,57 @@ function handleDeleteHoliday(ss, payload) {
   }
 
   return { success: false, message: "ไม่พบวันหยุดนี้ในระบบ" };
+}
+
+/**
+ * ลบวันหยุดหลายรายการพร้อมกัน (Batch delete holidays)
+ */
+function handleDeleteMultipleHolidays(ss, payload) {
+  const sheet = ss.getSheetByName("Holidays");
+  if (!sheet) return { success: false, message: "ไม่พบแผ่นงาน Holidays" };
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: true, message: "ไม่มีข้อมูลวันหยุด" };
+
+  const items = payload.items || [];
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: true, message: "ไม่มีรายการที่ต้องลบ" };
+  }
+
+  const idsToDelete = {};
+  const dateNameKeys = {};
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.id) idsToDelete[String(it.id).trim()] = true;
+    const d = it.holiday_date ? String(it.holiday_date).split("T")[0].trim() : "";
+    const n = it.name ? String(it.name).trim() : "";
+    if (d && n) dateNameKeys[d + "_" + n] = true;
+  }
+
+  const rowsToDelete = [];
+  for (let i = 1; i < data.length; i++) {
+    const rowId = String(data[i][0]).trim();
+    let rowDate = data[i][1];
+    if (rowDate instanceof Date) {
+      rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } else if (typeof rowDate === "string" && rowDate.indexOf("T") > -1) {
+      rowDate = rowDate.split("T")[0];
+    }
+    rowDate = String(rowDate).trim();
+    const rowName = String(data[i][2]).trim();
+
+    if ((rowId && idsToDelete[rowId]) || (rowDate && rowName && dateNameKeys[rowDate + "_" + rowName])) {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  // ลบแถวจากล่างขึ้นบน
+  for (let k = rowsToDelete.length - 1; k >= 0; k--) {
+    sheet.deleteRow(rowsToDelete[k]);
+  }
+
+  SpreadsheetApp.flush();
+  return { success: true, message: "ลบวันหยุดสำเร็จ " + rowsToDelete.length + " รายการ" };
 }
 
 /**

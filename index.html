@@ -53,7 +53,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="css/style.css?v=3.4">
+  <link rel="stylesheet" href="css/style.css?v=3.5">
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col md:flex-row">
 
@@ -649,6 +649,10 @@
               <i data-lucide="download-cloud" class="w-4 h-4"></i>
               <span>โหลดวันหยุดไทยมาตรฐาน</span>
             </button>
+            <button id="btn-toggle-select-holidays" class="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors" title="กดเพื่อแสดงช่องติ๊กเลือกลบทีละรายการ">
+              <i data-lucide="check-square" class="w-4 h-4 text-amber-600"></i>
+              <span id="txt-btn-select-mode">ลบทีละรายการ</span>
+            </button>
             <button id="btn-clear-all-holidays" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors" title="ลบข้อมูลวันหยุดนักขัตฤกษ์ทั้งหมด">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
               <span>ลบทั้งหมด</span>
@@ -660,12 +664,35 @@
           </div>
         </div>
 
+        <!-- Selection Toolbar (แสดงขึ้นเมื่อกดปุ่ม "ลบทีละรายการ") -->
+        <div id="holidays-selection-bar" class="hidden bg-gradient-to-r from-rose-50 via-amber-50/60 to-rose-50 border border-rose-200/80 p-3 sm:p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div class="flex items-center gap-2.5">
+            <span class="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-full bg-rose-600 text-white text-xs font-bold font-mono" id="badge-holiday-selected-count">0</span>
+            <div>
+              <p class="text-xs font-bold text-slate-800">โหมดเลือกลบวันหยุดที่ไม่ใช้งาน</p>
+              <p class="text-[11px] text-slate-500">ติ๊กเลือกช่องสี่เหลี่ยมด้านหน้าวันหยุดที่ต้องการลบ แล้วกดปุ่มลบด้านขวา</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <button type="button" id="btn-cancel-holiday-select" class="px-3.5 py-2 rounded-lg text-xs font-medium text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 transition-colors shadow-2xs">
+              ยกเลิก
+            </button>
+            <button type="button" id="btn-delete-selected-holidays" class="bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-colors">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <span>ลบรายการที่เลือก (<span id="txt-holiday-selected-count">0</span>)</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Holidays Table -->
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left text-xs text-slate-600">
               <thead class="bg-slate-50 text-slate-700 border-b border-slate-200 uppercase tracking-wider text-[11px]">
                 <tr>
+                  <th id="th-holiday-checkbox" class="hidden py-3 px-3 w-10 text-center">
+                    <input type="checkbox" id="checkbox-holiday-select-all" class="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-slate-300 cursor-pointer" title="เลือก / ยกเลิก ทั้งหมด">
+                  </th>
                   <th class="py-3 px-4">วันที่วันหยุด</th>
                   <th class="py-3 px-4">ชื่อวันหยุดนักขัตฤกษ์ / วันหยุดพิเศษ</th>
                   <th class="py-3 px-4 text-center">ปี พ.ศ./ค.ศ.</th>
@@ -1500,8 +1527,8 @@
   </nav>
 
   <!-- Scripts with Cache Buster -->
-  <script src="js/config.js?v=3.4"></script>
-  <script src="js/api.js?v=3.4"></script>
-  <script src="js/app.js?v=3.4"></script>
+  <script src="js/config.js?v=3.5"></script>
+  <script src="js/api.js?v=3.5"></script>
+  <script src="js/app.js?v=3.5"></script>
 </body>
 </html>
