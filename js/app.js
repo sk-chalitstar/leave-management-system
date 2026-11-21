@@ -159,7 +159,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
       state.leaveRequests = mergedRequests;
       window.leaveAPI.safeSetLeaves(mergedRequests);
-      state.holidays = data.holidays || [];
+
+      // กรองวันหยุดที่เคยถูกลบออก (LEAVE_DELETED_HOLIDAY_KEYS) เพื่อป้องกันข้อมูลเด้งกลับมา
+      let deletedHolidayKeys = [];
+      try {
+        deletedHolidayKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+      } catch (e) {}
+
+      const rawFetchedHols = data.holidays || [];
+      const filteredHols = rawFetchedHols.filter(h => {
+        const norm = LeaveAPI.normalizeHoliday(h);
+        if (!norm) return false;
+        const idKey = String(norm.id || "").trim();
+        const nameKey = String(norm.name || "").trim();
+        const dateNameKey = `${norm.holiday_date}__${norm.name}`;
+
+        if (idKey && deletedHolidayKeys.includes(idKey)) return false;
+        if (nameKey && deletedHolidayKeys.includes(nameKey)) return false;
+        if (dateNameKey && deletedHolidayKeys.includes(dateNameKey)) return false;
+        return true;
+      });
+
+      state.holidays = filteredHols;
+      localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(filteredHols));
 
       // รักษา state.currentEmployee ให้ซิงค์กับข้อมูลใหม่ล่าสุด
       if (state.currentEmployee) {
@@ -1779,16 +1801,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (confirm.isConfirmed) {
       try {
-        // อัปเดต in-memory state ทันที
+        // 1. เพิ่มเข้า Blacklist ทันที เพื่อป้องกันข้อมูลเด้งกลับมา
+        let deletedKeys = [];
+        try {
+          deletedKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+        } catch (e) {}
+        if (id) deletedKeys.push(String(id).trim());
+        if (holidayName) deletedKeys.push(String(holidayName).trim());
+        if (holidayDate && holidayName) deletedKeys.push(`${holidayDate}__${String(holidayName).trim()}`);
+        localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify([...new Set(deletedKeys)]));
+
+        // 2. อัปเดต in-memory state ทันที
         state.holidays = (state.holidays || []).filter(h => {
           const norm = LeaveAPI.normalizeHoliday(h);
           if (!norm) return false;
           if (id && norm.id && String(norm.id).trim() === String(id).trim()) return false;
+          if (holidayName && String(norm.name).trim() === String(holidayName).trim()) return false;
           if (holidayDate && holidayName && String(norm.name).trim() === String(holidayName).trim() && String(norm.holiday_date).includes(holidayDate)) return false;
           return true;
         });
         const itemKey = `${holidayDate}__${holidayName}`;
         if (state.selectedHolidays) state.selectedHolidays.delete(itemKey);
+        localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(state.holidays));
         renderHolidaysTable();
 
         await window.leaveAPI.deleteHoliday(id, holidayDate, holidayName);
@@ -3232,7 +3266,20 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         try {
+          // เพิ่มทุกรายการเข้า Blacklist เพื่อป้องกันข้อมูลเด้งกลับมา
+          let allDeletedKeys = [];
+          (state.holidays || []).forEach(h => {
+            const norm = LeaveAPI.normalizeHoliday(h);
+            if (norm) {
+              if (norm.id) allDeletedKeys.push(String(norm.id).trim());
+              if (norm.name) allDeletedKeys.push(String(norm.name).trim());
+              if (norm.holiday_date && norm.name) allDeletedKeys.push(`${norm.holiday_date}__${String(norm.name).trim()}`);
+            }
+          });
+          localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify(allDeletedKeys));
+
           state.holidays = [];
+          localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify([]));
           renderHolidaysTable();
           await window.leaveAPI.clearAllHolidays();
           Swal.fire({ icon: "success", title: "ลบวันหยุดทั้งหมดเรียบร้อยแล้ว", timer: 1500, showConfirmButton: false });
@@ -3355,6 +3402,9 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       if (confirm.isConfirmed) {
+        // ล้าง Blacklist รายการที่เคยลบออก เพื่อให้สามารถโหลดชุดมาตรฐานกลับมาได้ครบถ้วน
+        localStorage.removeItem("LEAVE_DELETED_HOLIDAY_KEYS");
+
         // อัปเดตตารางหน้าจอทันที ไม่ต้องรอนาน
         const defaultList = CONFIG.DEFAULT_HOLIDAYS_GENERATOR(year);
         state.holidays = defaultList;
@@ -3469,14 +3519,29 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         try {
-          // ลบออกจาก state.holidays ทันที
+          // 1. เพิ่มเข้า Blacklist ทันที เพื่อป้องกันข้อมูลเด้งกลับมา
+          let deletedKeys = [];
+          try {
+            deletedKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+          } catch (e) {}
+
+          selectedItems.forEach(it => {
+            if (it.id) deletedKeys.push(String(it.id).trim());
+            if (it.name) deletedKeys.push(String(it.name).trim());
+            if (it.holiday_date && it.name) deletedKeys.push(`${it.holiday_date}__${String(it.name).trim()}`);
+          });
+          localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify([...new Set(deletedKeys)]));
+
+          // 2. ลบออกจาก state.holidays ทันที
           const keysToDelete = new Set(selectedItems.map(it => `${it.holiday_date}__${it.name}`));
+          const namesToDelete = new Set(selectedItems.map(it => it.name).filter(Boolean));
           const idsToDelete = new Set(selectedItems.map(it => it.id).filter(Boolean));
 
           state.holidays = (state.holidays || []).filter(h => {
             const norm = LeaveAPI.normalizeHoliday(h);
             if (!norm) return false;
             if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
+            if (norm.name && namesToDelete.has(String(norm.name).trim())) return false;
             const k = `${norm.holiday_date}__${norm.name}`;
             if (keysToDelete.has(k)) return false;
             return true;
@@ -3484,6 +3549,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           state.selectedHolidays.clear();
           state.holidaySelectMode = false;
+          localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(state.holidays));
           renderHolidaysTable();
 
           await window.leaveAPI.deleteMultipleHolidays(selectedItems);

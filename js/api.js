@@ -224,9 +224,25 @@ class LeaveAPI {
             normalizedHolidays = cachedHols.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
           }
 
-          if (normalizedHolidays.length > 0) {
-            localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(normalizedHolidays));
+          // กรองรายการที่ผู้ใช้เคยกดลบออก (LEAVE_DELETED_HOLIDAY_KEYS) เพื่อป้องกันข้อมูลเด้งกลับมา
+          let deletedHolidayKeys = [];
+          try {
+            deletedHolidayKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+          } catch (e) {}
+
+          if (deletedHolidayKeys.length > 0) {
+            normalizedHolidays = normalizedHolidays.filter(h => {
+              const idKey = String(h.id || "").trim();
+              const nameKey = String(h.name || "").trim();
+              const dateNameKey = `${h.holiday_date}__${h.name}`;
+              if (idKey && deletedHolidayKeys.includes(idKey)) return false;
+              if (nameKey && deletedHolidayKeys.includes(nameKey)) return false;
+              if (dateNameKey && deletedHolidayKeys.includes(dateNameKey)) return false;
+              return true;
+            });
           }
+
+          localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(normalizedHolidays));
 
           return {
             employees: normalizedEmployees,
@@ -268,7 +284,24 @@ class LeaveAPI {
     });
 
     const rawLocalHols = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    const normalizedLocalHols = rawLocalHols.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+    let normalizedLocalHols = rawLocalHols.map(h => LeaveAPI.normalizeHoliday(h)).filter(h => h && h.holiday_date);
+
+    let localDeletedHolidayKeys = [];
+    try {
+      localDeletedHolidayKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+    } catch (e) {}
+
+    if (localDeletedHolidayKeys.length > 0) {
+      normalizedLocalHols = normalizedLocalHols.filter(h => {
+        const idKey = String(h.id || "").trim();
+        const nameKey = String(h.name || "").trim();
+        const dateNameKey = `${h.holiday_date}__${h.name}`;
+        if (idKey && localDeletedHolidayKeys.includes(idKey)) return false;
+        if (nameKey && localDeletedHolidayKeys.includes(nameKey)) return false;
+        if (dateNameKey && localDeletedHolidayKeys.includes(dateNameKey)) return false;
+        return true;
+      });
+    }
 
     return {
       employees: normalizedLocalEmps,
@@ -718,6 +751,29 @@ class LeaveAPI {
    * ลบวันหยุด (รองรับการค้นหาจาก id, วันที่ หรือชื่อ)
    */
   async deleteHoliday(holidayId, holidayDate = "", holidayName = "") {
+    // 1. บันทึกลงใน Blacklist เพื่อป้องกันข้อมูลเด้งกลับมาเมื่อ loadData()
+    let deletedKeys = [];
+    try {
+      deletedKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+    } catch (e) {}
+    if (holidayId) deletedKeys.push(String(holidayId).trim());
+    if (holidayName) deletedKeys.push(String(holidayName).trim());
+    if (holidayDate && holidayName) deletedKeys.push(`${holidayDate}__${String(holidayName).trim()}`);
+    localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify([...new Set(deletedKeys)]));
+
+    // 2. ลบออกจาก LocalStorage
+    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    holidays = holidays.filter(h => {
+      const norm = LeaveAPI.normalizeHoliday(h);
+      if (!norm) return false;
+      if (holidayId && String(norm.id).trim() === String(holidayId).trim()) return false;
+      if (holidayName && String(norm.name).trim() === String(holidayName).trim()) return false;
+      if (holidayDate && holidayName && String(norm.name).trim() === String(holidayName).trim() && String(norm.holiday_date).includes(holidayDate)) return false;
+      return true;
+    });
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+
+    // 3. ส่งคำสั่งลบไปยัง Google Sheets
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -733,19 +789,12 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result.success) return result;
+        if (result && result.success) return result;
       } catch (err) {
         console.warn("GAS delete holiday error:", err);
       }
     }
 
-    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    holidays = holidays.filter(h => {
-      if (holidayId && String(h.id).trim() === String(holidayId).trim()) return false;
-      if (holidayDate && holidayName && String(h.name).trim() === String(holidayName).trim() && String(h.holiday_date).includes(holidayDate)) return false;
-      return true;
-    });
-    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
     return { success: true, message: "ลบวันหยุดเรียบร้อย" };
   }
 
@@ -757,6 +806,41 @@ class LeaveAPI {
       return { success: true, message: "ไม่มีรายการที่ต้องลบ" };
     }
 
+    // 1. บันทึกทุกรายการลงใน Blacklist ทันที เพื่อป้องกันข้อมูลเด้งกลับมา
+    let deletedKeys = [];
+    try {
+      deletedKeys = JSON.parse(localStorage.getItem("LEAVE_DELETED_HOLIDAY_KEYS") || "[]");
+    } catch (e) {}
+
+    items.forEach(it => {
+      if (it.id) deletedKeys.push(String(it.id).trim());
+      if (it.name) deletedKeys.push(String(it.name).trim());
+      if (it.holiday_date && it.name) deletedKeys.push(`${it.holiday_date}__${String(it.name).trim()}`);
+    });
+    localStorage.setItem("LEAVE_DELETED_HOLIDAY_KEYS", JSON.stringify([...new Set(deletedKeys)]));
+
+    // 2. ลบออกจาก LocalStorage
+    const idsToDelete = new Set(items.map(it => String(it.id || "").trim()).filter(Boolean));
+    const namesToDelete = new Set(items.map(it => String(it.name || "").trim()).filter(Boolean));
+    const keysToDelete = new Set(items.map(it => {
+      const d = LeaveAPI.formatDateISO(it.holiday_date);
+      const n = String(it.name || "").trim();
+      return d && n ? `${d}__${n}` : "";
+    }).filter(Boolean));
+
+    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
+    holidays = holidays.filter(h => {
+      const norm = LeaveAPI.normalizeHoliday(h);
+      if (!norm) return false;
+      if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
+      if (norm.name && namesToDelete.has(String(norm.name).trim())) return false;
+      const k = `${norm.holiday_date}__${norm.name}`;
+      if (keysToDelete.has(k)) return false;
+      return true;
+    });
+    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
+
+    // 3. ซิงค์ลบขึ้น Google Sheets
     if (this.isLive()) {
       try {
         const res = await fetch(this.gasUrl, {
@@ -768,32 +852,48 @@ class LeaveAPI {
           })
         });
         const result = await res.json();
-        if (result && result.success) {
-          // Success from GAS
+        
+        // หาก Google Apps Script บนคลาวด์ยังเป็นเวอร์ชันเก่า (ไม่รู้จัก deleteMultipleHolidays)
+        // ให้ส่ง deleteHoliday ทีละรายการเป็น Fallback
+        if (!result || !result.success) {
+          for (const it of items) {
+            try {
+              await fetch(this.gasUrl, {
+                method: "POST",
+                headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify({
+                  action: "deleteHoliday",
+                  payload: {
+                    id: it.id,
+                    holiday_date: it.holiday_date,
+                    name: it.name
+                  }
+                })
+              });
+            } catch (e) {}
+          }
         }
       } catch (err) {
-        console.warn("GAS delete multiple holidays error:", err);
+        console.warn("GAS delete multiple holidays error, trying fallback:", err);
+        for (const it of items) {
+          try {
+            await fetch(this.gasUrl, {
+              method: "POST",
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({
+                action: "deleteHoliday",
+                payload: {
+                  id: it.id,
+                  holiday_date: it.holiday_date,
+                  name: it.name
+                }
+              })
+            });
+          } catch (e) {}
+        }
       }
     }
 
-    const idsToDelete = new Set(items.map(it => String(it.id || "").trim()).filter(Boolean));
-    const keysToDelete = new Set(items.map(it => {
-      const d = LeaveAPI.formatDateISO(it.holiday_date);
-      const n = String(it.name || "").trim();
-      return d && n ? `${d}_${n}` : "";
-    }).filter(Boolean));
-
-    let holidays = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.HOLIDAYS) || "[]");
-    holidays = holidays.filter(h => {
-      const norm = LeaveAPI.normalizeHoliday(h);
-      if (!norm) return false;
-      if (norm.id && idsToDelete.has(String(norm.id).trim())) return false;
-      const k = `${norm.holiday_date}_${norm.name}`;
-      if (keysToDelete.has(k)) return false;
-      return true;
-    });
-
-    localStorage.setItem(CONFIG.STORAGE_KEYS.HOLIDAYS, JSON.stringify(holidays));
     return { success: true, message: `ลบวันหยุดเรียบร้อยแล้ว ${items.length} รายการ` };
   }
 

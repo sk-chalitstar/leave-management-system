@@ -802,18 +802,43 @@ function handleDeleteHoliday(ss, payload) {
   const targetName = payload.name ? String(payload.name).trim() : "";
 
   for (let i = 1; i < data.length; i++) {
-    const rowId = String(data[i][0]).trim();
-    let rowDate = data[i][1];
-    if (rowDate instanceof Date) {
-      rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-    } else if (typeof rowDate === "string" && rowDate.indexOf("T") > -1) {
-      rowDate = rowDate.split("T")[0];
-    }
-    rowDate = String(rowDate).trim();
-    const rowName = String(data[i][2]).trim();
+    const row = data[i];
+    const rowId = String(row[0] || "").trim();
+    let matched = false;
 
-    if ((holId && rowId === holId) || (targetDate && targetName && rowDate === targetDate && rowName === targetName)) {
+    // 1. ตรวจสอบจาก ID
+    if (holId && rowId === holId) {
+      matched = true;
+    }
+
+    // 2. ตรวจสอบจากชื่อวันหยุดในทุกคอลัมน์ของแถว (แม่นยำที่สุด)
+    if (!matched && targetName) {
+      for (let c = 0; c < row.length; c++) {
+        const val = String(row[c] || "").trim();
+        if (val === targetName || (val.length > 2 && targetName.indexOf(val) > -1)) {
+          matched = true;
+          break;
+        }
+      }
+    }
+
+    // 3. ตรวจสอบจากวันที่
+    if (!matched && targetDate) {
+      for (let c = 0; c < row.length; c++) {
+        let cell = row[c];
+        if (cell instanceof Date) {
+          const dStr = Utilities.formatDate(cell, Session.getScriptTimeZone(), "yyyy-MM-dd");
+          if (dStr === targetDate) { matched = true; break; }
+        } else if (typeof cell === "string" && cell.indexOf(targetDate) > -1) {
+          matched = true;
+          break;
+        }
+      }
+    }
+
+    if (matched) {
       sheet.deleteRow(i + 1);
+      SpreadsheetApp.flush();
       return { success: true, message: "ลบวันหยุดสำเร็จ" };
     }
   }
@@ -836,29 +861,55 @@ function handleDeleteMultipleHolidays(ss, payload) {
   }
 
   const idsToDelete = {};
-  const dateNameKeys = {};
+  const namesToDelete = {};
+  const datesToDelete = {};
 
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (it.id) idsToDelete[String(it.id).trim()] = true;
-    const d = it.holiday_date ? String(it.holiday_date).split("T")[0].trim() : "";
-    const n = it.name ? String(it.name).trim() : "";
-    if (d && n) dateNameKeys[d + "_" + n] = true;
+    if (it.name) namesToDelete[String(it.name).trim()] = true;
+    if (it.holiday_date) datesToDelete[String(it.holiday_date).split("T")[0].trim()] = true;
   }
 
   const rowsToDelete = [];
   for (let i = 1; i < data.length; i++) {
-    const rowId = String(data[i][0]).trim();
-    let rowDate = data[i][1];
-    if (rowDate instanceof Date) {
-      rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-    } else if (typeof rowDate === "string" && rowDate.indexOf("T") > -1) {
-      rowDate = rowDate.split("T")[0];
-    }
-    rowDate = String(rowDate).trim();
-    const rowName = String(data[i][2]).trim();
+    const row = data[i];
+    const rowId = String(row[0] || "").trim();
+    let matched = false;
 
-    if ((rowId && idsToDelete[rowId]) || (rowDate && rowName && dateNameKeys[rowDate + "_" + rowName])) {
+    // 1. ตรวจสอบจาก ID
+    if (rowId && idsToDelete[rowId]) {
+      matched = true;
+    }
+
+    // 2. ตรวจสอบจากชื่อวันหยุดในทุกคอลัมน์ของแถวนี้
+    if (!matched) {
+      for (let c = 0; c < row.length; c++) {
+        const val = String(row[c] || "").trim();
+        if (val && namesToDelete[val]) {
+          matched = true;
+          break;
+        }
+      }
+    }
+
+    // 3. ตรวจสอบจากวันที่
+    if (!matched) {
+      for (let c = 0; c < row.length; c++) {
+        let cell = row[c];
+        if (cell instanceof Date) {
+          const dStr = Utilities.formatDate(cell, Session.getScriptTimeZone(), "yyyy-MM-dd");
+          if (datesToDelete[dStr]) { matched = true; break; }
+        } else if (typeof cell === "string") {
+          for (const dKey in datesToDelete) {
+            if (cell.indexOf(dKey) > -1) { matched = true; break; }
+          }
+          if (matched) break;
+        }
+      }
+    }
+
+    if (matched) {
       rowsToDelete.push(i + 1);
     }
   }
