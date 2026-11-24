@@ -1197,10 +1197,14 @@ class LeaveAPI {
   }
 
   /**
-   * Helper: คำนวณสิทธิ์วันลาคงเหลือของพนักงานแต่ละคน
+   * Helper: คำนวณสิทธิ์วันลาคงเหลือของพนักงานแต่ละคน โดยแยกตามปี (Annual Quota by Calendar Year)
+   * รองรับการระบุ targetYear ทั้ง ค.ศ. (เช่น 2026, 2027) หรือ พ.ศ. (เช่น 2569, 2570)
    */
-  calculateEmployeeBalances(employee, allLeaveRequests, currentYear = new Date().getFullYear()) {
+  calculateEmployeeBalances(employee, allLeaveRequests, targetYear = new Date().getFullYear()) {
     if (!employee) return null;
+
+    let yearNum = parseInt(targetYear, 10) || new Date().getFullYear();
+    if (yearNum > 2400) yearNum -= 543; // แปลง พ.ศ. เป็น ค.ศ.
 
     const quotas = {
       annual: Number(employee.annual_leave_quota || 0),
@@ -1216,12 +1220,16 @@ class LeaveAPI {
       other: 0
     };
 
-    const empLeaves = allLeaveRequests.filter(l => {
+    const empLeaves = (allLeaveRequests || []).filter(l => {
       if (String(l.emp_id).trim() !== String(employee.emp_id).trim()) return false;
       if (l.status === "Rejected" || l.status === "Cancelled") return false;
       
-      const leaveYear = new Date(l.start_date).getFullYear();
-      return leaveYear === currentYear;
+      const cleanStart = LeaveAPI.formatDateISO(l.start_date);
+      const cleanEnd = LeaveAPI.formatDateISO(l.end_date);
+      const sY = cleanStart ? parseInt(cleanStart.slice(0, 4), 10) : 0;
+      const eY = cleanEnd ? parseInt(cleanEnd.slice(0, 4), 10) : 0;
+      
+      return sY === yearNum || eY === yearNum;
     });
 
     for (let req of empLeaves) {
@@ -1233,12 +1241,17 @@ class LeaveAPI {
       else used.other += days;
     }
 
+    used.annual = Math.round(used.annual * 100) / 100;
+    used.personal = Math.round(used.personal * 100) / 100;
+    used.sick = Math.round(used.sick * 100) / 100;
+    used.other = Math.round(used.other * 100) / 100;
+
     return {
       emp_id: employee.emp_id,
       name: employee.name,
       department: employee.department,
       position: employee.position,
-      year: currentYear,
+      year: yearNum,
       annual: {
         quota: quotas.annual,
         used: used.annual,

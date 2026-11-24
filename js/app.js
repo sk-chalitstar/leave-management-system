@@ -89,6 +89,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (durationType === "hourly" && endDatePicker) {
           endDatePicker.setDate(dateStr, true);
         }
+        if (state.currentEmployee) {
+          updateEmployeeLiveQuota(state.currentEmployee.emp_id);
+        }
         calculateFormDays();
       }
     });
@@ -526,11 +529,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * เติมข้อมูลลง Dropdown เลือกปีรายงาน (พ.ศ. / ค.ศ.)
+   * เติมข้อมูลลง Dropdown เลือกปีรายงาน (พ.ศ. / ค.ศ.) และ Dropdown เลือกปีสิทธิ์วันลาพนักงาน
    */
   function populateReportYearFilter() {
     const yearSelect = document.getElementById("report-filter-year");
-    if (!yearSelect) return;
+    const empYearSelect = document.getElementById("filter-employee-year");
 
     const currentYear = new Date().getFullYear();
     const yearsSet = new Set([currentYear, currentYear - 1, currentYear - 2, currentYear + 1]);
@@ -547,14 +550,25 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const sortedYears = Array.from(yearsSet).sort((a, b) => b - a);
-    const currentValue = yearSelect.value;
 
-    yearSelect.innerHTML = `<option value="">-- ทุกปี (All Years) --</option>` +
-      sortedYears.map(y => {
+    if (yearSelect) {
+      const currentValue = yearSelect.value;
+      yearSelect.innerHTML = `<option value="">-- ทุกปี (All Years) --</option>` +
+        sortedYears.map(y => {
+          const thYear = y + 543;
+          const isCurrent = y === currentYear ? " (ปีปัจจุบัน)" : "";
+          return `<option value="${y}" ${String(y) === String(currentValue) ? "selected" : ""}>พ.ศ. ${thYear} (${y})${isCurrent}</option>`;
+        }).join("");
+    }
+
+    if (empYearSelect) {
+      const currentEmpYearValue = empYearSelect.value || String(currentYear);
+      empYearSelect.innerHTML = sortedYears.map(y => {
         const thYear = y + 543;
         const isCurrent = y === currentYear ? " (ปีปัจจุบัน)" : "";
-        return `<option value="${y}" ${String(y) === String(currentValue) ? "selected" : ""}>พ.ศ. ${thYear} (${y})${isCurrent}</option>`;
+        return `<option value="${y}" ${String(y) === String(currentEmpYearValue) ? "selected" : ""}>สิทธิ์ประจำปี พ.ศ. ${thYear} (${y})${isCurrent}</option>`;
       }).join("");
+    }
   }
 
   /**
@@ -871,7 +885,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (emp) {
       if (deptInput) deptInput.value = `${emp.department} - ${emp.position || ""}`;
-      const balances = window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests);
+      const formStartDate = document.getElementById("leave-form-start-date")?.value;
+      const leaveYear = formStartDate ? formStartDate.slice(0, 4) : new Date().getFullYear();
+      const balances = window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests, leaveYear);
 
       document.getElementById("quota-remain-annual").textContent = balances.annual.remaining;
       document.getElementById("quota-remain-personal").textContent = balances.personal.remaining;
@@ -1509,6 +1525,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const grid = document.getElementById("employees-card-grid");
     const searchTerm = (document.getElementById("filter-search-employee")?.value || "").toLowerCase().trim();
     const deptFilter = document.getElementById("filter-employee-dept")?.value || "";
+    const yearFilter = document.getElementById("filter-employee-year")?.value || "";
+    const targetYear = yearFilter ? Number(yearFilter) : new Date().getFullYear();
+    const thTargetYear = targetYear + 543;
 
     if (!grid) return;
 
@@ -1531,7 +1550,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     grid.innerHTML = filtered.map(emp => {
-      const balances = window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests);
+      const balances = window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests, targetYear);
       const annualPercent = balances.annual.quota > 0 
         ? Math.min(100, Math.round((balances.annual.used / balances.annual.quota) * 100)) 
         : 0;
@@ -1559,7 +1578,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <!-- Annual Leave Progress Bar -->
             <div class="mt-4 pt-3 border-t border-slate-100">
               <div class="flex justify-between text-xs mb-1">
-                <span class="font-medium text-slate-600">ใช้วันพักร้อนไปแล้ว</span>
+                <span class="font-medium text-slate-600">ใช้วันพักร้อนไปแล้ว <span class="text-[11px] text-slate-400 font-normal">(ปี พ.ศ. ${thTargetYear})</span></span>
                 <span class="font-bold text-blue-600">${balances.annual.used} / ${balances.annual.quota} วัน (${annualPercent}%)</span>
               </div>
               <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
@@ -1918,11 +1937,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const empId = document.getElementById("report-filter-emp")?.value || "";
     const leaveType = document.getElementById("report-filter-type")?.value || "";
 
-    // 1. ตรวจสอบการเลือกพนักงาน เพื่อแสดงการ์ดสรุปยอดวันลาแยกแต่ละประเภท (เช่น ลาพักร้อน 3/10 วัน)
+    // กำหนดปีเป้าหมายในการคำนวณโควตา (ตามตัวกรองปีที่เลือก หรือปีของวันที่เริ่ม)
+    let targetQuotaYear = new Date().getFullYear();
+    if (selectedYear) {
+      targetQuotaYear = Number(selectedYear);
+    } else if (startDate) {
+      const sY = parseInt(startDate.slice(0, 4), 10);
+      if (!isNaN(sY) && sY > 2000) targetQuotaYear = sY;
+    }
+    const quotaThYear = targetQuotaYear + 543;
+
+    // 1. ตรวจสอบการเลือกพนักงาน เพื่อแสดงการ์ดสรุปยอดวันลาแยกแต่ละประเภท (เช่น ลาพักร้อน 3/10 วัน) ตามปีที่เลือก
     const selectedEmp = empId ? state.employees.find(e => String(e.emp_id).trim() === String(empId).trim()) : null;
 
     if (selectedEmp && empSummaryCard) {
-      const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests);
+      const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests, targetQuotaYear);
       const totalUsed = (balances.annual.used + balances.personal.used + balances.sick.used + balances.other.used);
       const totalQuota = (balances.annual.quota + balances.personal.quota + balances.sick.quota + balances.other.quota);
       const totalRemaining = (balances.annual.remaining + balances.personal.remaining + balances.sick.remaining + balances.other.remaining);
@@ -1952,9 +1981,9 @@ document.addEventListener("DOMContentLoaded", () => {
               </div>
             </div>
             <div class="sm:text-right bg-white sm:bg-transparent p-2 sm:p-0 rounded-lg border sm:border-0 border-slate-200">
-              <span class="text-[11px] text-slate-500 block font-medium">ภาพรวมการใช้วันลาทั้งหมด</span>
+              <span class="text-[11px] text-slate-500 block font-medium">ภาพรวมการใช้วันลา (ประจำปี พ.ศ. ${quotaThYear})</span>
               <span class="text-base font-extrabold text-blue-700 font-mono">ใช้ไป ${totalUsed} / ${totalQuota} วัน</span>
-              <span class="text-[11px] text-emerald-600 font-semibold block">(สิทธิ์คงเหลือรวม ${totalRemaining} วัน)</span>
+              <span class="text-[11px] text-emerald-600 font-semibold block">(สิทธิ์คงเหลือประจำปี รวม ${totalRemaining} วัน)</span>
             </div>
           </div>
 
@@ -2211,7 +2240,8 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("modal-printable-report")?.classList.add("hidden");
 
     const emp = state.employees.find(e => String(e.emp_id).trim() === String(req.emp_id).trim());
-    const balances = emp ? window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests) : null;
+    const reqYear = req.start_date ? LeaveAPI.formatDateISO(req.start_date).slice(0, 4) : new Date().getFullYear();
+    const balances = emp ? window.leaveAPI.calculateEmployeeBalances(emp, state.leaveRequests, reqYear) : null;
     const typeInfo = CONFIG.LEAVE_TYPES[req.leave_type] || CONFIG.LEAVE_TYPES.other;
 
     document.getElementById("slip-req-id").textContent = req.request_id;
@@ -2325,14 +2355,16 @@ document.addEventListener("DOMContentLoaded", () => {
       typeScopeLabel = CONFIG.LEAVE_TYPES[leaveType].name;
     }
 
-    // สรุปยอดโควตาวันลาเมื่อเลือกพนักงานเฉพาะราย (ใช้ตาราง 4 ช่องเรียบร้อย ไม่พังในทุกเบราว์เซอร์)
+    // สรุปยอดโควตาวันลาเมื่อเลือกพนักงานเฉพาะราย (ใช้ตาราง 4 ช่องเรียบร้อย ไม่พังในทุกเบราว์เซอร์) ตามปีที่เลือก
     let quotaHtml = "";
     if (selectedEmp) {
-      const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests);
+      const targetQuotaYear = selectedYear ? Number(selectedYear) : (startDate ? Number(startDate.slice(0, 4)) : new Date().getFullYear());
+      const quotaThYear = targetQuotaYear + 543;
+      const balances = window.leaveAPI.calculateEmployeeBalances(selectedEmp, state.leaveRequests, targetQuotaYear);
       quotaHtml = `
         <div class="border border-slate-300 rounded-lg p-3 bg-slate-50/90 text-xs" style="border: 1px solid #cbd5e1; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 10px 0;">
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-bottom: 8px;">
-            <span style="font-weight: 700; color: #1e293b;">📊 สรุปสิทธิ์วันลาคงเหลือของพนักงาน (ณ วันที่พิมพ์):</span>
+            <span style="font-weight: 700; color: #1e293b;">📊 สรุปสิทธิ์วันลาคงเหลือประจำปี พ.ศ. ${quotaThYear} (${targetQuotaYear}):</span>
             <span style="font-family: monospace; font-size: 11px; color: #64748b;">${escapeHtml(selectedEmp.emp_id)} - ${escapeHtml(selectedEmp.name)}</span>
           </div>
           <table style="width: 100%; border-collapse: collapse; text-align: center; border: 1px solid #cbd5e1;">
@@ -3366,9 +3398,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Employee Search & Dept Filter
+    // Employee Search, Dept Filter & Year Filter
     document.getElementById("filter-search-employee")?.addEventListener("input", () => renderEmployeeCards());
     document.getElementById("filter-employee-dept")?.addEventListener("change", () => renderEmployeeCards());
+    document.getElementById("filter-employee-year")?.addEventListener("change", () => renderEmployeeCards());
 
     // Open Add Employee Modal
     document.getElementById("btn-open-add-employee-modal")?.addEventListener("click", () => {
